@@ -1,0 +1,10 @@
+[project]
+name = "nearby-friends"
+version = "0.1.0"
+description = "System Design Interview Vol.2 - Ch.2 Nearby Friends simulator (Redis Pub/Sub + Cache, HTTP + SSE)"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "redis>=5.0.1",
+]
