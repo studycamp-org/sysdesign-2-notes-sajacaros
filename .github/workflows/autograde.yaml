@@ -1,0 +1,42 @@
+# Classroom50 autograder shim.
+#
+# Intentionally inert: delegates everything to the reusable
+# autograde-runner workflow in your teacher's config repo
+# (studycamp-org/classroom50/.github/workflows/autograde-runner.yaml).
+# Auto-tagging, runtime dispatch, fetching runner.py, executing the
+# autograder, posting commit status, and publishing the release all
+# happen there. Teacher edits to the runner or to assignments.json
+# propagate to every student repo on the next submission since
+# `@main` resolves at workflow-call time.
+#
+# This file should not be edited.
+#
+# Triggers:
+#   • push to the repo's default branch: every commit grades (except
+#                         the acceptance commit, which the runner detects
+#                         and skips); the runner creates the
+#                         submit/<UTC-timestamp>-<short-sha> tag itself
+#   • push of submit/*:   manual or web-UI tag pushes work too;
+#                         the runner reuses the pushed tag
+
+name: Autograde
+
+on:
+  push:
+    branches: ["main"]
+    tags: ["submit/*"]
+
+jobs:
+  grade:
+    # `uses:` quoted so the unsubstituted studycamp-org/main placeholders
+    # parse as a plain string rather than a YAML flow mapping, so
+    # actionlint and any other YAML pre-flight tool can validate
+    # the embed before substitution.
+    uses: "studycamp-org/classroom50/.github/workflows/autograde-runner.yaml@main"
+    permissions:
+      contents: write
+      statuses: write
+      # Lets the runner open the opt-in Feedback PR. A
+      # reusable workflow's token is the intersection with the caller's
+      # grants, so this must mirror autograde-runner.yaml's permissions.
+      pull-requests: write
