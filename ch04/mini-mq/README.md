@@ -25,9 +25,14 @@ docker compose down -v        # 끝. -v 는 브로커 데이터까지 지운다
 
 ## 대시보드
 
-http://localhost:8081 (8082, 8083 도 같은 화면). 위에서 아래로:
+http://localhost:8081 (8082, 8083 도 같은 화면). 탭이 둘이다 (`?view=simple` / `?view=full`):
 
-- **조정 서비스**: 가운데 위 ZooKeeper-lite 상자(/controller · /brokers · /metadata), 브로커마다 세션 박동 선. 👑 = /controller 를 차지한 브로커
+- **① 기본 흐름**: 생산자(버퍼 → 라우팅) → 토픽의 파티션 → 소비자 그룹. 리더·팔로워·복제·조정 서비스는 감춘다. 메시지 한 건이 어디로 가는지만 본다
+- **② 브로커 · 복제**: 아래 전부. 브로커 상자 안의 리더·팔로워 사본, 복제, ZooKeeper-lite 와 세션. 컨트롤러 선출 재생은 ② 에서 한다
+
+② 의 구성, 위에서 아래로:
+
+- **조정 서비스**: 가운데 위 ZooKeeper-lite 상자(/controller · /brokers · /metadata · /offsets), 브로커마다 세션 박동 선. 👑 = /controller 를 차지한 브로커
 - **데이터 플레인**: 생산자(버퍼 → 라우팅) → 브로커 상자 안 사본 → 소비자 그룹
   - 파티션 왼쪽 띠 색 = 리더 브로커, 사본 칸 = ★ 리더 / 꽉 참 ISR / 점선 ISR 밖, 칸 위 화살표 = 복제(주황 뒤처짐, 빨강 ISR 밖)
 - **보라 점선** = 클라이언트가 지도(메타데이터)를 받아 감 = 라우팅. 평소엔 없고 장애 직후에 나타난다
@@ -95,7 +100,7 @@ producer-orders ─▶ orders 3 파티션 × 사본 3, ACK=all, 최소 ISR 2 ─
 
 | 교재 | 여기서 | 코드 |
 |---|---|---|
-| 코디네이터 찾기 (그룹 이름 해시) | 그룹 이름 해시 → `__consumer_offsets` 파티션 → 그 리더 브로커가 코디네이터 | `Topics.offsetsPartition` |
+| 코디네이터 찾기 (그룹 이름 해시) | 살아 있는 브로커를 번호순으로 놓고 hash(그룹) % 개수 번째. 지도만 있으면 누구나 같은 답 | `Topics.coordinatorFor` |
 | 합류 → 리더 소비자 선출 → 배치 계획 → 동기화 | join(모두 올 때까지 응답 보류) → 세대 +1, 리더 소비자 지정 → 리더가 계획(range / roundrobin) → sync 로 각자 몫 | `GroupCoordinator`, `Consumer.rejoin`, `Consumer.assign` |
 | 재합류 요청은 박동 응답으로 (수동적) | 재조정이 시작되면 다음 박동 응답에 `rebalance=true` | `GroupCoordinator.heartbeat` |
 | 나가기 (그림 4.19) | 나간다고 알리면 바로 재조정 | `leave` |
@@ -124,7 +129,7 @@ producer-orders ─▶ orders 3 파티션 × 사본 3, ACK=all, 최소 ISR 2 ─
 ### 4단계의 한계
 
 - 재조정은 **전부 멈춤(eager)** 방식이다. 한 명만 바뀌어도 모두 파티션을 내려놓고 다시 받는다 (카프카의 협력적 재조정은 바뀌는 파티션만 옮긴다)
-- 그룹 상태(멤버·세대)를 저장하지 않아 코디네이터가 바뀌면 처음부터 다시 합류한다 (카프카는 `__consumer_offsets` 에 그룹 메타데이터도 쓴다)
+- 그룹 상태(멤버·세대)를 저장하지 않아 코디네이터가 바뀌면 처음부터 다시 합류한다. 오프셋은 조정 서비스에 있어 이어 간다
 - 처리가 오래 걸려도 박동은 따로 가므로 "멈춘 처리"를 잡지 못한다 (카프카 `max.poll.interval.ms`)
 
 ## 3단계: 복제 (그림 4.23~4.28)
@@ -138,7 +143,7 @@ producer-orders ─▶ orders 3 파티션 × 사본 3, ACK=all, 최소 ISR 2 ─
 | 최소 ISR | ACK=all 인데 ISR 이 이보다 적으면 **저장하지 않고 503** | 〃 |
 | 브로커 장애 복구 | 컨트롤러가 죽은 브로커를 ISR 에서 빼고, 리더였으면 ISR 에서 새 리더 + leader epoch +1. ISR 이 다 죽으면 리더 없음 | `Controller.onBrokerDead` |
 | 꼬리 잘라내기 (교재 밖, KIP-101) | 돌아온 옛 리더는 "내 마지막 epoch 가 새 리더 로그에서 어디까지?"를 묻고 그 뒤를 자른다 | `truncateToLeader`, `PartitionLog.endOffsetForEpoch` |
-| 상태 저장소 | 오프셋도 내부 토픽 `__consumer_offsets`(사본 3, ACK=all)에. 그룹 이름 해시 → 파티션 → 그 리더가 코디네이터 | `OffsetStore` |
+| 상태 저장소 | (지금은 조정 서비스 `/offsets` 로 옮김. 이 단계에선 내부 토픽 `__consumer_offsets` 에 복제해 두었다) | `OffsetStore` |
 
 생산자는 재시도를 끝없이 한다. 그래서 소비자의 `gap` 은 전부 **ACK 를 받았는데 사라진** 메시지다.
 
@@ -156,7 +161,7 @@ producer-orders ─▶ orders 3 파티션 × 사본 3, ACK=all, 최소 ISR 2 ─
 ### 3단계의 한계
 
 - **선호 리더 복귀 없음**: 죽었다 돌아온 브로커는 팔로워로만 남는다. 리더가 한 브로커에 몰린다(실험 뒤 broker-2 가 리더 6개, broker-1 이 0개)
-- 소비자는 커밋된 오프셋을 받아야 시작한다. 그룹 코디네이터 브로커가 죽으면 `__consumer_offsets` 리더가 옮겨질 때까지(몇 초) 소비가 멈춘다
+- 소비자는 커밋된 오프셋을 받아야 시작한다. 그룹 코디네이터 브로커가 죽으면 지도가 바뀌어 새 코디네이터에 다시 합류할 때까지(몇 초) 소비가 멈춘다
 - HW 를 디스크에 남기지 않는다. 재시작한 리더는 팔로워가 한 번씩 올 때까지 HW 를 올리지 않는다
 - ISR 이 모두 죽으면 깨끗한 리더 선출만 한다(ISR 밖 사본을 리더로 올리는 unclean 선출 없음 = 가용성보다 영속성)
 
@@ -178,6 +183,7 @@ producer-orders ─▶ orders 3 파티션 × 사본 3, ACK=all, 최소 ISR 2 ─
 | 리더 선출: 브로커 중 하나가 컨트롤러 | `/controller` 가 비면(감시 알림) 모두 임시 노드로 만들어 보고, 먼저 만든 브로커가 컨트롤러. 노드가 만들어진 순번(czxid) = 컨트롤러 epoch | `Coordination.tryBecomeController` |
 | 메타데이터 저장소 | `/metadata`. 컨트롤러가 "그 버전일 때만, 그리고 /controller 가 아직 나일 때만" 고친다 → 낡은 컨트롤러의 쓰기는 거절(CHECK_FAILED) | `Coordination.propose` |
 | 컨트롤러 → 브로커 | 브로커들은 감시로 `/metadata` 가 바뀐 걸 알고 다시 읽어 자기 역할(리더·팔로워)을 바꾼다 | `ReplicaManager.onMetadata` |
+| 상태 저장소 (그림 4.22) | 소비자 그룹 오프셋 `/offsets/{그룹}/{토픽}/{파티션}`. 소비자 → 그룹 코디네이터(세대 확인) → 조정 서비스에 기록 | `OffsetStore`, `Coordination.putOffset` |
 
 브로커끼리는 투표하지 않는다. **조정 서비스가 1대라 단일 장애점**이다: 죽으면 컨트롤러 선출·메타데이터 변경이 멈춘다
 (브로커는 들고 있는 메타데이터로 계속 읽고 쓴다). 진짜 주키퍼는 3·5대가 ZAB 로 복제한다.
