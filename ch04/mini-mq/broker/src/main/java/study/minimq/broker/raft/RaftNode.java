@@ -52,6 +52,8 @@ public final class RaftNode {
     }
 
     private static final int MAX_EVENTS = 40;
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger("events");
+    private static final org.slf4j.Logger rpc = org.slf4j.LoggerFactory.getLogger("raft.rpc"); // 디버그용: 박동 송수신
 
     private final int id;
     private final Map<Integer, String> members;
@@ -83,6 +85,7 @@ public final class RaftNode {
     private final List<Consumer<ClusterMetadata>> listeners = new CopyOnWriteArrayList<>();
     private final Deque<RaftEvent> events = new ArrayDeque<>();
     private long eventSeq;
+    private long lastTrace;
     private volatile boolean isolated;
 
     public RaftNode(int id, Map<Integer, String> members, RaftTransport transport, RaftStorage storage,
@@ -122,10 +125,15 @@ public final class RaftNode {
         VoteRequest voteReq = null;
         AppendRequest appendReq = null;
         synchronized (this) {
+            if (rpc.isDebugEnabled() && now - lastTrace >= 1000) {
+                lastTrace = now;
+                rpc.debug("tick: role {} term {} 다음 박동까지 {}ms 선거 마감까지 {}ms", role, currentTerm, nextHeartbeat - now, electionDeadline - now);
+            }
             if (role == Role.LEADER) {
                 if (now < nextHeartbeat) return;
                 nextHeartbeat = now + timing.heartbeatMs();
                 appendReq = new AppendRequest(currentTerm, id, accepted, committed.version(), committed);
+                rpc.debug("tick: 박동 보냄 term {} (다음 {}ms 뒤)", currentTerm, timing.heartbeatMs());
             } else {
                 if (now < electionDeadline) return;
                 startElection();
@@ -153,10 +161,15 @@ public final class RaftNode {
                 });
             } else {
                 AppendRequest r = appendReq;
+                long sentAt = clock.getAsLong();
                 io.execute(() -> {
+                    long start = clock.getAsLong();
                     try {
-                        onAppendResponse(term, peer, transport.append(url, r));
+                        AppendResponse resp = transport.append(url, r);
+                        rpc.debug("append → {} 큐 대기 {}ms 왕복 {}ms ok", peer, start - sentAt, clock.getAsLong() - start);
+                        onAppendResponse(term, peer, resp);
                     } catch (Exception ignored) {
+                        rpc.debug("append → {} 큐 대기 {}ms 왕복 {}ms 실패 {}", peer, start - sentAt, clock.getAsLong() - start, ignored.toString());
                         // 응답 없음. lastAck 가 갱신되지 않아 컨트롤러가 죽은 브로커로 판단할 수 있다
                     }
                 });
@@ -227,6 +240,7 @@ public final class RaftNode {
 
     public synchronized AppendResponse handleAppend(AppendRequest r) {
         checkNotIsolated();
+        rpc.debug("append ← {} term {} (마감까지 {}ms)", r.leaderId(), r.term(), electionDeadline - clock.getAsLong());
         if (r.term() < currentTerm) {
             // 낡은 리더(좀비 컨트롤러)의 명령은 거부한다 = 펜싱. 응답의 term 을 보고 그쪽이 내려간다
             event("낡은 term " + r.term() + " 의 broker-" + r.leaderId() + " 박동 거부 (지금 term " + currentTerm + ")");
@@ -335,6 +349,7 @@ public final class RaftNode {
 
     private void event(String text) {
         events.addFirst(new RaftEvent(clock.getAsLong(), ++eventSeq, id, currentTerm, text));
+        log.info("[term {}] {}", currentTerm, text);
         while (events.size() > MAX_EVENTS) events.removeLast();
     }
 

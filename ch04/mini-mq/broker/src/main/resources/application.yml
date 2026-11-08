@@ -8,6 +8,10 @@ spring:
   threads:
     virtual:
       enabled: true
+  task:
+    scheduling:
+      pool:
+        size: 4   # @Scheduled 작업(생사 감시·ISR·재조정·보관)이 서로 막지 않게
   mvc:
     async:
       request-timeout: 30s

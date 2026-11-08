@@ -28,10 +28,13 @@ public class AdminApi {
     private final ReplicaManager replicas;
     private final OffsetStore offsets;
     private final Traffic traffic;
+    private final GroupCoordinator groups;
     private final ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor();
 
-    public AdminApi(BrokerProperties props, RaftNode raft, ReplicaManager replicas, OffsetStore offsets, Traffic traffic) {
+    public AdminApi(BrokerProperties props, RaftNode raft, ReplicaManager replicas, OffsetStore offsets, Traffic traffic,
+                    GroupCoordinator groups) {
         this.traffic = traffic;
+        this.groups = groups;
         this.props = props;
         this.raft = raft;
         this.replicas = replicas;
@@ -47,6 +50,7 @@ public class AdminApi {
         out.put("replicas", replicas.states());
         out.put("offsets", offsets.all());
         out.put("traffic", traffic.snapshot());
+        out.put("groups", groups.states());
         return out;
     }
 
@@ -108,6 +112,31 @@ public class AdminApi {
             Runtime.getRuntime().halt(1);
         });
         return Map.of("id", props.brokerId(), "crash", true);
+    }
+
+    /** 이 브로커가 그 그룹의 코디네이터면 멤버에게 지시를 건다 (다음 박동 응답으로 전달). */
+    @PostMapping("/admin/group-command")
+    public Map<String, Object> groupCommand(@RequestParam String group, @RequestParam String member, @RequestParam String cmd) {
+        return Map.of("delivered", groups.command(group, member, cmd));
+    }
+
+    /** 대시보드: 코디네이터가 누군지 몰라도 되게 모든 브로커에 뿌린다. */
+    @PostMapping("/admin/cluster/group-command")
+    public Map<String, Object> groupCommandAll(@RequestParam String group, @RequestParam String member, @RequestParam String cmd) {
+        boolean delivered = false;
+        for (String url : raft.members().values()) {
+            try {
+                String q = "/admin/group-command?group=%s&member=%s&cmd=%s".formatted(enc(group), enc(member), enc(cmd));
+                Map<?, ?> r = new MiniMqHttp(url).post(q, Map.of(), Map.class, Duration.ofSeconds(2));
+                delivered |= Boolean.TRUE.equals(r.get("delivered"));
+            } catch (IOException ignored) {
+            }
+        }
+        return Map.of("delivered", delivered);
+    }
+
+    private static String enc(String s) {
+        return java.net.URLEncoder.encode(s, java.nio.charset.StandardCharsets.UTF_8);
     }
 
     /** 대시보드가 다른 브로커에 실험 명령을 보낼 때: action = isolate | slow | crash. */

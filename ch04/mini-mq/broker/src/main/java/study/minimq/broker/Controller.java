@@ -57,8 +57,16 @@ public class Controller {
     private TopicInfo create(TopicInfo req) {
         TopicMetadata existing = raft.accepted().topics().get(req.name());
         if (existing != null) return info(existing);
+        TopicMetadata t = plan(req, raft.accepted());
+        await(raft.propose(m -> m.topics().containsKey(req.name()) ? m : m.withTopic(t)));
+        raft.note("토픽 " + req.name() + " 생성: 파티션 " + req.partitions() + "개 × 사본 " + t.replicationFactor()
+                + " (최소 ISR " + t.minInsyncReplicas() + ")");
+        return info(t);
+    }
 
-        List<Integer> alive = raft.accepted().brokers().values().stream()
+    /** 사본 분산 계획: 파티션 p 의 사본은 살아 있는 브로커 p, p+1, p+2 ... (리더도 고르게 퍼진다) */
+    private static TopicMetadata plan(TopicInfo req, ClusterMetadata m) {
+        List<Integer> alive = m.brokers().values().stream()
                 .filter(BrokerInfo::alive).map(BrokerInfo::id).sorted().toList();
         int rf = Math.min(req.replicationFactor() > 0 ? req.replicationFactor() : 3, alive.size());
         int minIsr = Math.min(req.minInsyncReplicas() > 0 ? req.minInsyncReplicas() : 1, rf);
@@ -68,10 +76,7 @@ public class Controller {
             for (int i = 0; i < rf; i++) replicas.add(alive.get((p + i) % alive.size())); // 같은 파티션의 사본은 서로 다른 브로커
             parts.add(new PartitionMetadata(p, replicas.get(0), 0, replicas, replicas));
         }
-        TopicMetadata t = new TopicMetadata(req.name(), parts, rf, minIsr);
-        await(raft.propose(m -> m.topics().containsKey(req.name()) ? m : m.withTopic(t)));
-        raft.note("토픽 " + req.name() + " 생성: 파티션 " + req.partitions() + "개 × 사본 " + rf + " (최소 ISR " + minIsr + ")");
-        return info(t);
+        return new TopicMetadata(req.name(), parts, rf, minIsr);
     }
 
     private static TopicInfo info(TopicMetadata t) {
@@ -110,11 +115,9 @@ public class Controller {
         if (!raft.isLeader()) return;
         ClusterMetadata m = raft.accepted();
         if (!m.topics().containsKey(Topics.CONSUMER_OFFSETS) && m.controllerId() == props.brokerId()) {
-            try {
-                create(new TopicInfo(Topics.CONSUMER_OFFSETS, Topics.CONSUMER_OFFSETS_PARTITIONS, 3, 2));
-            } catch (ResponseStatusException ignored) {
-                // 다음 tick 에 다시
-            }
+            // 기다리지 않는다: 스케줄 작업이 커밋을 기다리며 막히면 안 된다. 받은(accepted) 메타데이터에 들어가면 다음엔 건너뛴다
+            raft.propose(x -> x.topics().containsKey(Topics.CONSUMER_OFFSETS) ? x
+                    : x.withTopic(plan(new TopicInfo(Topics.CONSUMER_OFFSETS, Topics.CONSUMER_OFFSETS_PARTITIONS, 3, 2), x)));
             return;
         }
         Map<Integer, Long> ages = raft.peerAckAges();

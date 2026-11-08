@@ -18,6 +18,9 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param replicaLagMaxMessages 리더보다 이만큼 넘게 뒤처지면 ISR 에서 뺀다 (교재 replica.lag.max.messages)
  * @param replicaLagTimeMs      이 시간 동안 가져가러 오지 않아도 ISR 에서 뺀다 (카프카 replica.lag.time.max.ms)
  * @param ackTimeoutMs          ACK=all 생산자가 ISR 전원의 복제를 기다리는 최대 시간
+ * @param sessionTimeoutMs      소비자 박동이 이 시간 동안 없으면 죽은 것으로 보고 재조정
+ * @param rebalanceTimeoutMs    재조정 때 멤버가 다시 합류하기를 기다리는 최대 시간
+ * @param initialRebalanceDelayMs 빈 그룹에 첫 멤버가 오면 다른 멤버도 함께 오도록 잠깐 기다린다
  */
 @ConfigurationProperties(prefix = "minimq")
 public record BrokerProperties(
@@ -33,7 +36,10 @@ public record BrokerProperties(
         @DefaultValue("3000") long brokerDeadMs,
         @DefaultValue("1000") long replicaLagMaxMessages,
         @DefaultValue("4000") long replicaLagTimeMs,
-        @DefaultValue("5000") long ackTimeoutMs) {
+        @DefaultValue("5000") long ackTimeoutMs,
+        @DefaultValue("6000") long sessionTimeoutMs,
+        @DefaultValue("4000") long rebalanceTimeoutMs,
+        @DefaultValue("1500") long initialRebalanceDelayMs) {
 
     public Map<Integer, String> members() {
         Map<Integer, String> m = new TreeMap<>();

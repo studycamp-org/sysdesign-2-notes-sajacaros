@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 import study.minimq.broker.raft.RaftNode;
 import study.minimq.common.ClusterMetadata;
 import study.minimq.common.FetchResponse;
+import study.minimq.common.GroupProtocol;
 import study.minimq.common.OffsetCommit;
 import study.minimq.common.ProduceRequest;
 import study.minimq.common.ProduceResponse;
@@ -27,10 +28,13 @@ public class BrokerApi {
     private final Controller controller;
     private final RaftNode raft;
     private final Traffic traffic;
+    private final GroupCoordinator groups;
     private static final String CLIENT = "X-MiniMq-Client";
 
-    public BrokerApi(ReplicaManager replicas, OffsetStore offsets, Controller controller, RaftNode raft, Traffic traffic) {
+    public BrokerApi(ReplicaManager replicas, OffsetStore offsets, Controller controller, RaftNode raft, Traffic traffic,
+                     GroupCoordinator groups) {
         this.traffic = traffic;
+        this.groups = groups;
         this.replicas = replicas;
         this.offsets = offsets;
         this.controller = controller;
@@ -87,7 +91,10 @@ public class BrokerApi {
     /** 오프셋 커밋. 그룹 코디네이터(= __consumer_offsets 의 해당 파티션 리더)에게 보낸다. */
     @PostMapping("/offsets")
     public CompletableFuture<Void> commit(@RequestBody List<OffsetCommit> commits,
+                                          @RequestParam(required = false) String memberId,
+                                          @RequestParam(required = false) Integer generation,
                                           @RequestHeader(value = CLIENT, required = false) String client) {
+        if (!commits.isEmpty()) groups.checkGeneration(commits.get(0).group(), memberId, generation);
         traffic.record(client, "commit", "", -1, 1, commits.isEmpty() ? null : commits.get(0).group());
         return offsets.commit(commits);
     }
@@ -95,6 +102,28 @@ public class BrokerApi {
     @GetMapping("/offsets")
     public Map<Integer, Long> committed(@RequestParam String group, @RequestParam String topic) {
         return offsets.committed(group, topic);
+    }
+
+    // ---------------------------------------------------------------- 소비자 그룹 (그림 4.15~4.20)
+
+    @PostMapping("/group/join")
+    public CompletableFuture<GroupProtocol.JoinResponse> join(@RequestBody GroupProtocol.JoinRequest req) {
+        return groups.join(req);
+    }
+
+    @PostMapping("/group/sync")
+    public CompletableFuture<GroupProtocol.SyncResponse> sync(@RequestBody GroupProtocol.SyncRequest req) {
+        return groups.sync(req);
+    }
+
+    @PostMapping("/group/heartbeat")
+    public GroupProtocol.HeartbeatResponse heartbeat(@RequestBody GroupProtocol.HeartbeatRequest req) {
+        return groups.heartbeat(req);
+    }
+
+    @PostMapping("/group/leave")
+    public void leave(@RequestBody GroupProtocol.LeaveRequest req) {
+        groups.leave(req);
     }
 
     // ---------------------------------------------------------------- 브로커끼리

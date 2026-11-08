@@ -18,6 +18,7 @@ x-broker-env: &broker-env
   MINIMQ_ELECTION_MAX_MS: "3000"
   MINIMQ_HEARTBEAT_MS: "500"
   MINIMQ_BROKER_DEAD_MS: "3000"
+  LOGGING_LEVEL_RAFT_RPC: ${RAFT_RPC_LOG:-INFO}   # RAFT_RPC_LOG=DEBUG ./run.sh 로 박동 송수신을 본다
   MINIMQ_REPLICA_LAG_TIME_MS: "4000"        # 4초 동안 안 가져가면 ISR 에서 뺀다
   MINIMQ_REPLICA_LAG_MAX_MESSAGES: "1000"   # 1000건 넘게 뒤처져도 뺀다
 
@@ -26,6 +27,8 @@ x-demo: &demo
   image: mini-mq-demo
   restart: unless-stopped
   depends_on: [broker-1, broker-2, broker-3]
+  environment: &demo-env
+    JAVA_TOOL_OPTIONS: "-Xmx128m -XX:+UseSerialGC -XX:TieredStopAtLevel=1"   # 소비자를 여럿 띄우므로 가볍게
 
 x-bootstrap: &bootstrap "http://broker-1:8080,http://broker-2:8080,http://broker-3:8080"
 
@@ -49,6 +52,7 @@ services:
   producer-logs:
     <<: *demo
     environment:
+      <<: *demo-env
       DEMO_ROLE: producer
       DEMO_BOOTSTRAP: *bootstrap
       DEMO_TOPIC: logs
@@ -60,6 +64,7 @@ services:
   producer-orders:
     <<: *demo
     environment:
+      <<: *demo-env
       DEMO_ROLE: producer
       DEMO_BOOTSTRAP: *bootstrap
       DEMO_TOPIC: orders
@@ -68,19 +73,26 @@ services:
       DEMO_MIN_INSYNC_REPLICAS: "2"
       DEMO_RATE_PER_SEC: "100"
 
+  # 4단계: 소비자 그룹. search 그룹에 3명 → 파티션 6개를 2개씩 (range)
   # 처리 후 커밋(최소 한 번). gap 이 생기면 = ACK 를 받았는데 사라진 메시지
+  # 늘리고 줄이기: docker compose up -d --scale consumer-logs=4
   consumer-logs:
     <<: *demo
+    deploy: { replicas: 3 }
     environment:
+      <<: *demo-env
       DEMO_ROLE: consumer
       DEMO_BOOTSTRAP: *bootstrap
       DEMO_TOPIC: logs
       DEMO_GROUP: search
       DEMO_COMMIT_MODE: after
 
+  # payment 그룹에 4명인데 파티션은 3개 → 1명은 논다 (교재 그림 4.7)
   consumer-orders:
     <<: *demo
+    deploy: { replicas: 4 }
     environment:
+      <<: *demo-env
       DEMO_ROLE: consumer
       DEMO_BOOTSTRAP: *bootstrap
       DEMO_TOPIC: orders

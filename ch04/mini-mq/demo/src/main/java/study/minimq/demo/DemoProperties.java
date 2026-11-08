@@ -15,7 +15,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param ratePerSec  초당 생산 건수
  * @param commitMode  before = 처리 전 커밋(최대 한 번) / after = 처리 후 커밋(최소 한 번)
  * @param processMs   메시지 한 건 처리에 걸리는 시간 (소비자를 일부러 느리게)
- * @param partitions  이 소비자가 맡을 파티션 (비우면 전부)
+ * @param partitions  이 소비자가 맡을 파티션. 비우면 소비자 그룹으로 코디네이터에게 배정받는다
+ * @param assignor    그룹의 리더 소비자가 배치 계획을 만드는 방식: range | roundrobin
  * @param crashEverySec 0 보다 크면 그 주기마다 "묶음 처리 도중 죽음"을 흉내 낸다.
  *                     소비자를 버리고 커밋된 오프셋부터 다시 시작 → before 면 gap(유실), after 면 dup(중복)
  */
@@ -38,6 +39,7 @@ public record DemoProperties(
         @DefaultValue("500") int maxRecords,
         @DefaultValue("1000") long waitMs,
         @DefaultValue("0") long crashEverySec,
+        @DefaultValue("range") String assignor,
         List<Integer> partitions) {
 
     public int acksValue() {
