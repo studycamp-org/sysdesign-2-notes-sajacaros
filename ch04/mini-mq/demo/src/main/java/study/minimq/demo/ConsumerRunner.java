@@ -100,8 +100,9 @@ class ConsumerRunner implements ApplicationRunner {
                         long now = System.currentTimeMillis();
                         if (now - lastReport >= 5_000) {
                             double rate = sinceReport * 1000.0 / (now - lastReport);
-                            log.info("[consumer {}] consumed={} ({}/s) lag={} gap={} dup={} crash={} badCrc={}",
-                                    props.group(), consumed, Math.round(rate), consumer.lag(), gaps, dups, crashes, badCrc);
+                            log.info("[consumer {}] consumed={} ({}/s) lag={} gap={} dup={} crash={} badCrc={}{}",
+                                    props.group(), consumed, Math.round(rate), consumer.lag(), gaps, dups, crashes, badCrc,
+                                    consumer.unavailable().isEmpty() ? "" : " 리더없음=" + consumer.unavailable());
                             lastReport = now;
                             sinceReport = 0;
                         }

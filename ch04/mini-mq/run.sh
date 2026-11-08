@@ -5,5 +5,5 @@ cd "$(dirname "$0")"
 ./gradlew -q bootJar
 docker compose up --build -d "$@"
 echo
-echo "대시보드: http://localhost:8081"
+echo "대시보드: http://localhost:8081  (8082, 8083 도 같은 화면)"
 echo "로그 보기: docker compose logs -f producer consumer-search consumer-anomaly"

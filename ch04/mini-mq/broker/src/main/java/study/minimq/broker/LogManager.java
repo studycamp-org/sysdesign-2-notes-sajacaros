@@ -1,11 +1,7 @@
 package study.minimq.broker;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -19,15 +15,17 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
 
 import jakarta.annotation.PreDestroy;
-import study.minimq.common.Json;
+import study.minimq.broker.raft.RaftNode;
+import study.minimq.common.ClusterMetadata;
+import study.minimq.common.PartitionMetadata;
 import study.minimq.common.TopicInfo;
+import study.minimq.common.TopicMetadata;
 
 /**
- * 토픽과 파티션 로그를 들고 있는 데이터 저장소.
- * 디렉터리 구조: {dataDir}/{topic}/Partition-{id}/segment-N.log (그림 4.10)
+ * 데이터 저장소. 디렉터리 구조: {dataDir}/{topic}/Partition-{id}/segment-N.log (그림 4.10)
  *
- * <p>1단계에서는 토픽 목록(메타데이터)도 브로커 로컬 파일 topics.json 에 둔다.
- * 2단계에서 컨트롤러(Raft-lite)가 관리하는 메타데이터로 옮긴다.
+ * <p>어떤 파티션을 맡을지는 컨트롤러가 정한 메타데이터(커밋된 것)를 따른다.
+ * 내가 리더가 아닌 파티션으로 요청이 오면 409 로 거절하고, 클라이언트는 메타데이터를 다시 받아 리더를 찾아간다.
  */
 @Component
 public class LogManager {
@@ -35,67 +33,58 @@ public class LogManager {
 
     private final BrokerProperties props;
     private final Path dataDir;
-    private final Path topicsFile;
-    private final Map<String, TopicInfo> topics = new ConcurrentHashMap<>();
     private final Map<String, PartitionLog> logs = new ConcurrentHashMap<>();
+    private volatile ClusterMetadata meta;
 
-    public LogManager(BrokerProperties props) throws IOException {
+    public LogManager(BrokerProperties props, RaftNode raft) {
         this.props = props;
         this.dataDir = Path.of(props.dataDir());
-        this.topicsFile = dataDir.resolve("topics.json");
-        Files.createDirectories(dataDir);
-        if (Files.exists(topicsFile)) {
-            for (TopicInfo t : Json.MAPPER.readValue(topicsFile.toFile(), TopicInfo[].class)) open(t);
-        }
-        log.info("broker {} data={} topics={}", props.brokerId(), dataDir.toAbsolutePath(), topics.keySet());
+        this.meta = raft.committed();
+        raft.addListener(this::onMetadata);
     }
 
-    public synchronized TopicInfo createTopic(TopicInfo req) {
-        if (req.name() == null || !req.name().matches("[A-Za-z0-9._-]+")) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "토픽 이름은 영문·숫자·._- 만");
-        }
-        TopicInfo existing = topics.get(req.name());
-        if (existing != null) return existing;
-        if (req.partitions() < 1) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "파티션은 1개 이상");
-        open(req);
-        persistTopics();
-        log.info("topic created {} partitions={}", req.name(), req.partitions());
-        return req;
-    }
-
-    private void open(TopicInfo t) {
-        topics.put(t.name(), t);
-        for (int p = 0; p < t.partitions(); p++) {
-            Path dir = dataDir.resolve(t.name()).resolve("Partition-" + p);
-            logs.put(key(t.name(), p), new PartitionLog(t.name(), p, dir, props.segmentBytes(), props.flushEveryWrite()));
+    private void onMetadata(ClusterMetadata m) {
+        meta = m;
+        for (TopicMetadata t : m.topics().values()) {
+            for (PartitionMetadata p : t.partitions()) {
+                if (p.leader() == props.brokerId()) open(t.name(), p.partition());
+            }
         }
     }
 
-    private void persistTopics() {
-        try {
-            Path tmp = dataDir.resolve("topics.json.tmp");
-            Json.MAPPER.writeValue(tmp.toFile(), topics.values());
-            Files.move(tmp, topicsFile, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+    private PartitionLog open(String topic, int partition) {
+        return logs.computeIfAbsent(key(topic, partition), k -> {
+            log.info("파티션 {} 을 맡는다", k);
+            return new PartitionLog(topic, partition, dataDir.resolve(topic).resolve("Partition-" + partition),
+                    props.segmentBytes(), props.flushEveryWrite());
+        });
     }
 
+    /** 이 브로커가 리더인 파티션의 로그. 아니면 404(없는 파티션) 또는 409(리더가 다른 브로커). */
     public PartitionLog log(String topic, int partition) {
-        PartitionLog l = logs.get(key(topic, partition));
-        if (l == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "없는 파티션: " + topic + "-" + partition);
-        return l;
+        PartitionMetadata pm = meta.partition(topic, partition)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "없는 파티션: " + topic + "-" + partition));
+        if (pm.leader() != props.brokerId()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "NOT_LEADER: " + topic + "-" + partition + " 의 리더는 broker-" + pm.leader());
+        }
+        return open(topic, partition);
     }
 
-    public Collection<TopicInfo> topics() {
-        return topics.values().stream().sorted(Comparator.comparing(TopicInfo::name)).toList();
+    public boolean isLeader(String topic, int partition) {
+        return meta.partition(topic, partition).map(p -> p.leader() == props.brokerId()).orElse(false);
     }
 
+    public List<TopicInfo> topics() {
+        return meta.topics().values().stream()
+                .map(t -> new TopicInfo(t.name(), t.partitions().size()))
+                .sorted(Comparator.comparing(TopicInfo::name)).toList();
+    }
+
+    /** 이 브로커가 들고 있는 파티션들의 상태. */
     public List<PartitionState> states() {
         List<PartitionState> out = new ArrayList<>();
-        for (TopicInfo t : topics()) {
-            for (int p = 0; p < t.partitions(); p++) out.add(log(t.name(), p).state());
-        }
+        logs.values().forEach(l -> out.add(l.state()));
+        out.sort(Comparator.comparing(PartitionState::topic).thenComparing(PartitionState::partition));
         return out;
     }
 
@@ -115,5 +104,4 @@ public class LogManager {
     private static String key(String topic, int partition) {
         return topic + "-" + partition;
     }
-
 }

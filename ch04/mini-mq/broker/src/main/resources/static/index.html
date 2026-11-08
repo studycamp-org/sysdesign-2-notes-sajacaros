@@ -3,90 +3,171 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>mini-mq 브로커</title>
+<title>mini-mq 클러스터</title>
 <style>
   :root {
     --bg: #faf7f2; --card: #ffffff; --ink: #2b2620; --muted: #8a8177; --line: #e6dfd5;
-    --seg: #d9cfc2; --active: #b5452f; --ok: #3f7d4e; --warn: #c07a12;
+    --seg: #d9cfc2; --accent: #b5452f; --ok: #3f7d4e; --warn: #c07a12; --bad: #b3261e;
+    --b1: #2f6db5; --b2: #3f7d4e; --b3: #8a4fb0;
   }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #1d1a17; --card: #26221e; --ink: #ece6dd; --muted: #a39a8f; --line: #3a342e; --seg: #4a433b; --active: #e0664d; }
+    :root { --bg: #1d1a17; --card: #26221e; --ink: #ece6dd; --muted: #a39a8f; --line: #3a342e; --seg: #4a433b;
+            --accent: #e0664d; --ok: #6bbf7f; --warn: #e2a33d; --bad: #f2776d; --b1: #6ea4e6; --b2: #6bbf7f; --b3: #c08be0; }
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif; }
-  header { padding: 16px 20px; border-bottom: 1px solid var(--line); display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; }
+  header { padding: 14px 20px; border-bottom: 1px solid var(--line); display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; }
   h1 { font-size: 18px; margin: 0; }
   .meta { color: var(--muted); font-size: 13px; }
-  main { padding: 16px 20px; display: grid; gap: 20px; }
+  main { padding: 16px 20px; display: grid; gap: 22px; max-width: 1400px; }
   h2 { font-size: 15px; margin: 0 0 8px; }
-  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+  .hint { font-size: 12px; color: var(--muted); margin: 0 0 8px; }
+  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
-  .card h3 { margin: 0 0 6px; font-size: 14px; display: flex; justify-content: space-between; }
+  .card h3 { margin: 0 0 6px; font-size: 14px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
   .nums { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-  .bar { display: flex; gap: 2px; height: 22px; margin: 8px 0 4px; }
-  .seg { background: var(--seg); border-radius: 3px; min-width: 6px; position: relative; }
-  .seg.active { background: var(--active); }
-  .legend { font-size: 12px; color: var(--muted); }
+  .badge { font-size: 11px; padding: 1px 7px; border-radius: 10px; border: 1px solid currentColor; white-space: nowrap; }
+  .LEADER { color: var(--accent); font-weight: 700; }
+  .CANDIDATE { color: var(--warn); font-weight: 600; }
+  .FOLLOWER { color: var(--muted); }
+  .down { opacity: .55; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 13px; font-variant-numeric: tabular-nums; margin: 6px 0; }
+  .kv span:nth-child(odd) { color: var(--muted); }
+  button { font: inherit; font-size: 12px; padding: 3px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  .bar { display: flex; gap: 2px; height: 20px; margin: 8px 0 4px; }
+  .seg { background: var(--seg); border-radius: 3px; min-width: 6px; }
+  .seg.active { background: var(--accent); }
+  .lead { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
   table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
   th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  .events td { font-size: 13px; }
+  .events td:first-child, .events td:nth-child(2), .events td:nth-child(3) { white-space: nowrap; color: var(--muted); }
   .lag0 { color: var(--ok); } .lagHi { color: var(--warn); font-weight: 600; }
+  .dead { color: var(--bad); font-weight: 600; }
   .empty { color: var(--muted); }
+  .twocol { display: grid; gap: 22px; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+  @media (max-width: 900px) { .twocol { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
 <header>
-  <h1>mini-mq 브로커 <span id="broker"></span></h1>
-  <span class="meta" id="cfg"></span>
+  <h1>mini-mq 클러스터</h1>
+  <span class="meta" id="summary"></span>
   <span class="meta" id="updated"></span>
 </header>
 <main>
   <section>
-    <h2>파티션과 세그먼트</h2>
-    <div class="legend">막대 하나 = 세그먼트 파일 하나 (너비 = 크기). <b style="color:var(--active)">빨간 칸</b>이 지금 쓰는 활성 세그먼트. 앞쪽은 보관 기간이 지나면 지워진다.</div>
-    <div class="grid" id="partitions"></div>
+    <h2>브로커 (Raft-lite)</h2>
+    <p class="hint">리더 = 컨트롤러. term 은 선거마다 오른다. "고립"을 누르면 그 브로커는 네트워크가 끊긴 것처럼 아무와도 이야기하지 못한다.
+      리더를 고립시키면 나머지 둘이 새 리더를 뽑고, 팔로워를 고립시키면 그 브로커 혼자 term 을 계속 올리다가 돌아와서 리더를 끌어내린다(PreVote 가 없어서).</p>
+    <div class="grid" id="brokers"></div>
   </section>
-  <section>
-    <h2>소비자 그룹 오프셋</h2>
-    <div class="card"><table>
-      <thead><tr><th>그룹</th><th>토픽-파티션</th><th>마지막 소비 오프셋</th><th>lag</th></tr></thead>
-      <tbody id="groups"></tbody>
-    </table></div>
-  </section>
+  <div class="twocol">
+    <section>
+      <h2>파티션 (컨트롤러가 배정한 리더)</h2>
+      <p class="hint">2단계는 사본이 하나라 리더 브로커가 죽으면 그 파티션은 멈춘다. 3단계에서 사본이 넘겨받는다.</p>
+      <div class="grid" id="partitions"></div>
+      <h2 style="margin-top:18px">소비자 그룹 오프셋</h2>
+      <div class="card"><table>
+        <thead><tr><th>그룹</th><th>토픽-파티션</th><th>마지막 소비 오프셋</th><th>lag</th></tr></thead>
+        <tbody id="groups"></tbody>
+      </table></div>
+    </section>
+    <section>
+      <h2>이벤트 (모든 브로커)</h2>
+      <div class="card"><table class="events">
+        <thead><tr><th>시각</th><th>브로커</th><th>term</th><th>무슨 일</th></tr></thead>
+        <tbody id="events"></tbody>
+      </table></div>
+    </section>
+  </div>
 </main>
 <script>
-const fmtBytes = b => b >= 1 << 20 ? (b / (1 << 20)).toFixed(1) + 'MB' : b >= 1024 ? (b / 1024).toFixed(0) + 'KB' : b + 'B';
-const fmtMs = ms => ms >= 86400000 ? (ms / 86400000).toFixed(0) + '일' : ms >= 60000 ? (ms / 60000).toFixed(0) + '분' : (ms / 1000).toFixed(0) + '초';
+const color = id => `var(--b${((id - 1) % 3) + 1})`;
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+const fmtBytes = b => b >= 1 << 20 ? (b / (1 << 20)).toFixed(1) + 'MB' : b >= 1024 ? (b / 1024).toFixed(0) + 'KB' : b + 'B';
+const time = ms => new Date(ms).toLocaleTimeString([], {hour12: false}) + '.' + String(ms % 1000).padStart(3, '0');
+const ROLE = {LEADER: '👑 리더 · 컨트롤러', CANDIDATE: '🗳 후보', FOLLOWER: '팔로워'};
+
+async function isolate(id, on) {
+  await fetch(`/admin/cluster/isolate?id=${id}&on=${on}`, {method: 'POST'}).catch(() => {});
+  refresh();
+}
 
 async function refresh() {
+  let s;
   try {
-    const s = await (await fetch('/admin/state')).json();
-    document.getElementById('broker').textContent = '#' + s.brokerId;
-    document.getElementById('cfg').textContent = `세그먼트 ${fmtBytes(s.segmentBytes)} · 보관 ${fmtMs(s.retentionMs)}`;
-    document.getElementById('updated').textContent = '갱신 ' + new Date().toLocaleTimeString();
-
-    const parts = document.getElementById('partitions');
-    parts.innerHTML = s.partitions.length ? s.partitions.map(p => {
-      const total = p.segments.reduce((a, x) => a + x.bytes, 0) || 1;
-      const bars = p.segments.map(x =>
-        `<div class="seg ${x.active ? 'active' : ''}" style="flex:${Math.max(x.bytes, total * 0.02)}"
-              title="${esc(x.file)}&#10;offset ${x.baseOffset}~${x.baseOffset + x.count - 1} (${x.count}건, ${fmtBytes(x.bytes)})"></div>`).join('');
-      return `<div class="card">
-        <h3><span>${esc(p.topic)}-${p.partition}</span><span class="nums">${p.segments.length}개 세그먼트</span></h3>
-        <div class="bar">${bars}</div>
-        <div class="nums">logStart ${p.logStartOffset} · LEO ${p.logEndOffset} · ${p.logEndOffset - p.logStartOffset}건 보관</div>
-      </div>`;
-    }).join('') : '<div class="empty">아직 토픽이 없습니다.</div>';
-
-    const groups = document.getElementById('groups');
-    groups.innerHTML = s.groups.length ? s.groups.map(g =>
-      `<tr><td>${esc(g.group)}</td><td>${esc(g.topic)}-${g.partition}</td><td>${g.committed}</td>
-           <td class="${g.lag === 0 ? 'lag0' : g.lag > 1000 ? 'lagHi' : ''}">${g.lag}</td></tr>`).join('')
-      : '<tr><td colspan="4" class="empty">아직 커밋한 그룹이 없습니다.</td></tr>';
+    s = await (await fetch('/admin/cluster')).json();
   } catch (e) {
-    document.getElementById('updated').textContent = '브로커에 연결할 수 없음';
+    document.getElementById('updated').textContent = '이 브로커에 연결할 수 없음 — 다른 포트(8081~8083)로 열어 보세요';
+    return;
   }
+  const meta = s.metadata;
+  const nodes = s.nodes;
+  document.getElementById('summary').textContent =
+    `이 화면: broker-${s.servedBy} · 커밋된 메타데이터 v${meta.version} · 컨트롤러 ${meta.controllerId > 0 ? 'broker-' + meta.controllerId + ' (epoch ' + meta.controllerEpoch + ')' : '없음'}`;
+  document.getElementById('updated').textContent = '갱신 ' + new Date().toLocaleTimeString([], {hour12: false});
+
+  // 브로커 카드
+  document.getElementById('brokers').innerHTML = nodes.map(n => {
+    const info = meta.brokers[n.id] || {};
+    if (!n.reachable) {
+      return `<div class="card down"><h3><span><span class="lead" style="background:${color(n.id)}"></span>broker-${n.id}</span>
+        <span class="badge dead">응답 없음</span></h3><div class="nums">컨테이너가 꺼졌거나 이 화면의 브로커가 고립됨</div></div>`;
+    }
+    const r = n.raft;
+    const lagging = r.acceptedVersion !== r.committedVersion;
+    return `<div class="card ${r.isolated ? 'down' : ''}">
+      <h3><span><span class="lead" style="background:${color(n.id)}"></span>broker-${n.id}</span>
+          <span class="badge ${r.role}">${ROLE[r.role]}</span></h3>
+      <div class="kv">
+        <span>term</span><span>${r.term}</span>
+        <span>투표</span><span>${r.votedFor ? 'broker-' + r.votedFor : '—'}</span>
+        <span>따르는 리더</span><span>${r.leaderId ? 'broker-' + r.leaderId : '—'}</span>
+        <span>메타데이터</span><span>커밋 v${r.committedVersion}${lagging ? ` · <b class="CANDIDATE">받기만 한 v${r.acceptedVersion}</b>` : ''}</span>
+        <span>컨트롤러가 보기에</span><span>${info.alive === false ? '<b class="dead">죽음</b>' : '살아 있음'}</span>
+      </div>
+      ${r.isolated
+        ? `<span class="badge dead">🔌 고립 중</span> <button onclick="isolate(${n.id}, false)">다시 연결</button>`
+        : `<button onclick="isolate(${n.id}, true)">🔌 고립</button>`}
+    </div>`;
+  }).join('');
+
+  // 파티션: 리더 브로커의 로컬 상태에서 세그먼트를 찾는다
+  const local = {};
+  const groups = [];
+  nodes.filter(n => n.reachable).forEach(n => {
+    (n.partitions || []).forEach(p => { local[`${p.topic}-${p.partition}`] = {...p, holder: n.id}; });
+    (n.groups || []).forEach(g => groups.push(g));
+  });
+  const parts = [];
+  Object.values(meta.topics).forEach(t => t.partitions.forEach(p => parts.push({topic: t.name, ...p})));
+  document.getElementById('partitions').innerHTML = parts.length ? parts.map(p => {
+    const st = local[`${p.topic}-${p.partition}`];
+    const leaderAlive = (meta.brokers[p.leader] || {}).alive !== false;
+    const total = st ? st.segments.reduce((a, x) => a + x.bytes, 0) || 1 : 1;
+    const bars = st ? st.segments.map(x => `<div class="seg ${x.active ? 'active' : ''}" style="flex:${Math.max(x.bytes, total * 0.03)}"
+        title="${esc(x.file)}&#10;offset ${x.baseOffset}~${x.baseOffset + x.count - 1} (${x.count}건, ${fmtBytes(x.bytes)})"></div>`).join('') : '';
+    return `<div class="card ${leaderAlive ? '' : 'down'}">
+      <h3><span>${esc(p.topic)}-${p.partition}</span>
+          <span class="nums"><span class="lead" style="background:${color(p.leader)}"></span>리더 broker-${p.leader}</span></h3>
+      ${st ? `<div class="bar">${bars}</div><div class="nums">LEO ${st.logEndOffset} · 세그먼트 ${st.segments.length}개 · logStart ${st.logStartOffset}</div>`
+           : `<div class="nums ${leaderAlive ? '' : 'dead'}">${leaderAlive ? '상태를 못 가져옴' : '리더 브로커 다운 — 사본이 없어 멈춤'}</div>`}
+    </div>`;
+  }).join('') : '<div class="empty">아직 토픽이 없습니다.</div>';
+
+  groups.sort((a, b) => a.group.localeCompare(b.group) || a.partition - b.partition);
+  document.getElementById('groups').innerHTML = groups.length ? groups.map(g =>
+    `<tr><td>${esc(g.group)}</td><td>${esc(g.topic)}-${g.partition}</td><td>${g.committed}</td>
+         <td class="${g.lag === 0 ? 'lag0' : g.lag > 1000 ? 'lagHi' : ''}">${g.lag}</td></tr>`).join('')
+    : '<tr><td colspan="4" class="empty">아직 커밋한 그룹이 없습니다.</td></tr>';
+
+  // 이벤트 타임라인
+  const events = nodes.filter(n => n.reachable).flatMap(n => n.raft.events).sort((a, b) => b.at - a.at || (a.node === b.node ? b.seq - a.seq : a.node - b.node)).slice(0, 40);
+  document.getElementById('events').innerHTML = events.map(e =>
+    `<tr><td>${time(e.at)}</td><td><span class="lead" style="background:${color(e.node)}"></span>${e.node}</td><td>${e.term}</td><td>${esc(e.text)}</td></tr>`).join('');
 }
 refresh();
 setInterval(refresh, 1000);

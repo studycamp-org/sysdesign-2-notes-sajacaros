@@ -17,6 +17,24 @@ public final class MiniMqHttp {
     private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build();
     private final String base;
 
+    /** 브로커가 4xx·5xx 로 답했다. 409 = 이 브로커는 그 파티션의 리더가 아님, 503 = 지금은 못 받음. */
+    public static final class HttpStatusException extends IOException {
+        private final int status;
+
+        public HttpStatusException(int status, String message) {
+            super(message);
+            this.status = status;
+        }
+
+        public int status() {
+            return status;
+        }
+    }
+
+    public String base() {
+        return base;
+    }
+
     public MiniMqHttp(String bootstrap) {
         this.base = bootstrap.endsWith("/") ? bootstrap.substring(0, bootstrap.length() - 1) : bootstrap;
     }
@@ -27,18 +45,22 @@ public final class MiniMqHttp {
     }
 
     public <T> T post(String path, Object body, Class<T> type) throws IOException {
-        String s = send(postRequest(path, body));
+        return post(path, body, type, Duration.ofSeconds(10));
+    }
+
+    public <T> T post(String path, Object body, Class<T> type, Duration timeout) throws IOException {
+        String s = send(postRequest(path, body, timeout));
         return type == Void.class || s.isEmpty() ? null : Json.MAPPER.readValue(s, type);
     }
 
     /** 응답을 기다리지 않는 전송 (ACK=0). */
     public CompletableFuture<?> postAndForget(String path, Object body) throws IOException {
-        return client.sendAsync(postRequest(path, body), HttpResponse.BodyHandlers.discarding());
+        return client.sendAsync(postRequest(path, body, Duration.ofSeconds(10)), HttpResponse.BodyHandlers.discarding());
     }
 
-    private HttpRequest postRequest(String path, Object body) throws IOException {
+    private HttpRequest postRequest(String path, Object body, Duration timeout) throws IOException {
         return HttpRequest.newBuilder(URI.create(base + path))
-                .timeout(Duration.ofSeconds(10))
+                .timeout(timeout)
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofByteArray(Json.MAPPER.writeValueAsBytes(body)))
                 .build();
@@ -47,7 +69,7 @@ public final class MiniMqHttp {
     private String send(HttpRequest req) throws IOException {
         try {
             HttpResponse<String> res = client.send(req, HttpResponse.BodyHandlers.ofString());
-            if (res.statusCode() >= 400) throw new IOException(req.uri().getPath() + " → HTTP " + res.statusCode() + " " + res.body());
+            if (res.statusCode() >= 400) throw new HttpStatusException(res.statusCode(), req.uri().getPath() + " → HTTP " + res.statusCode() + " " + res.body());
             return res.body();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

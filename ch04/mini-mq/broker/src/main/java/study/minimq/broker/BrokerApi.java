@@ -1,10 +1,6 @@
 package study.minimq.broker;
 
-import java.util.ArrayList;
 import java.util.Collection;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -14,6 +10,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import study.minimq.broker.raft.RaftNode;
+import study.minimq.common.ClusterMetadata;
 import study.minimq.common.FetchResponse;
 import study.minimq.common.OffsetCommit;
 import study.minimq.common.ProduceRequest;
@@ -22,19 +20,22 @@ import study.minimq.common.TopicInfo;
 
 @RestController
 public class BrokerApi {
-    private final BrokerProperties props;
     private final LogManager logs;
     private final OffsetStore offsets;
+    private final Controller controller;
+    private final RaftNode raft;
 
-    public BrokerApi(BrokerProperties props, LogManager logs, OffsetStore offsets) {
-        this.props = props;
+    public BrokerApi(LogManager logs, OffsetStore offsets, Controller controller, RaftNode raft) {
         this.logs = logs;
         this.offsets = offsets;
+        this.controller = controller;
+        this.raft = raft;
     }
 
+    /** 어느 브로커에 보내도 된다. 컨트롤러가 아니면 컨트롤러에게 넘긴다. */
     @PostMapping("/topics")
     public TopicInfo createTopic(@RequestBody TopicInfo req) {
-        return logs.createTopic(req);
+        return controller.createTopic(req);
     }
 
     @GetMapping("/topics")
@@ -42,7 +43,13 @@ public class BrokerApi {
         return logs.topics();
     }
 
-    /** 생산자가 묶음을 보낸다. 1단계는 브로커 1대라 저장하면 바로 응답한다(사실상 ACK=1). */
+    /** 생산자·소비자가 보는 "지도". 어느 브로커에 물어봐도 커밋된 메타데이터를 준다. */
+    @GetMapping("/metadata")
+    public ClusterMetadata metadata() {
+        return raft.committed();
+    }
+
+    /** 생산자가 묶음을 보낸다. 이 브로커가 그 파티션의 리더가 아니면 409. */
     @PostMapping("/produce")
     public ProduceResponse produce(@RequestBody ProduceRequest req) {
         long[] range = logs.log(req.topic(), req.partition()).append(req.records());
@@ -67,39 +74,16 @@ public class BrokerApi {
                 log.logStartOffset(), log.logEndOffset()));
     }
 
+    /** 오프셋은 그 파티션의 리더 브로커에 저장한다 (2단계 임시. 4단계에서 __consumer_offsets 로). */
     @PostMapping("/offsets")
     public void commit(@RequestBody OffsetCommit c) {
-        logs.log(c.topic(), c.partition()); // 없는 파티션이면 404
+        logs.log(c.topic(), c.partition());
         offsets.commit(c);
     }
 
     @GetMapping("/offsets")
     public long committed(@RequestParam String group, @RequestParam String topic, @RequestParam int partition) {
+        logs.log(topic, partition);
         return offsets.committed(group, topic, partition);
-    }
-
-    /** 대시보드용 상태. */
-    @GetMapping("/admin/state")
-    public Map<String, Object> state() {
-        List<PartitionState> partitions = logs.states();
-        List<Map<String, Object>> groups = new ArrayList<>();
-        for (OffsetCommit c : offsets.all()) {
-            long leo = logs.log(c.topic(), c.partition()).logEndOffset();
-            Map<String, Object> g = new LinkedHashMap<>();
-            g.put("group", c.group());
-            g.put("topic", c.topic());
-            g.put("partition", c.partition());
-            g.put("committed", c.offset());
-            g.put("lag", Math.max(0, leo - 1 - c.offset()));
-            groups.add(g);
-        }
-        Map<String, Object> out = new LinkedHashMap<>();
-        out.put("brokerId", props.brokerId());
-        out.put("segmentBytes", props.segmentBytes());
-        out.put("retentionMs", props.retentionMs());
-        out.put("topics", logs.topics());
-        out.put("partitions", partitions);
-        out.put("groups", groups);
-        return out;
     }
 }

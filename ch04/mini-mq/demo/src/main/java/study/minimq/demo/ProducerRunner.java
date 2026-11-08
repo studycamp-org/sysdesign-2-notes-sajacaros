@@ -11,9 +11,7 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
-import study.minimq.client.MiniMqHttp;
 import study.minimq.client.Producer;
-import study.minimq.common.TopicInfo;
 
 /**
  * S1 로그창고 흉내: 서버 N대가 로그 한 줄씩 보낸다. 키 = 서버 ID.
@@ -34,8 +32,7 @@ class ProducerRunner implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) throws Exception {
-        Startup.waitForBroker(props.bootstrap());
-        new MiniMqHttp(props.bootstrap()).post("/topics", new TopicInfo(props.topic(), props.topicPartitions()), TopicInfo.class);
+        Startup.createTopic(props.bootstrap(), props.topic(), props.topicPartitions());
 
         Producer.Config cfg = new Producer.Config(props.bootstrap(), props.batchSize(), props.lingerMs(), props.acks(), 5);
         long[] seq = new long[props.servers()];

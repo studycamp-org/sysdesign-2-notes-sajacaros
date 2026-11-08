@@ -1,7 +1,6 @@
 package study.minimq.client;
 
 import java.io.IOException;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -15,13 +14,10 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-
 import study.minimq.common.Partitioner;
 import study.minimq.common.ProduceRecord;
 import study.minimq.common.ProduceRequest;
 import study.minimq.common.ProduceResponse;
-import study.minimq.common.TopicInfo;
 
 /**
  * 생산자 클라이언트 라이브러리 (그림 4.12): 라우팅과 버퍼를 생산자 안에 둔다.
@@ -33,6 +29,7 @@ import study.minimq.common.TopicInfo;
  *   <li>순서: 파티션마다 전송 스레드를 하나만 둔다. 앞 묶음의 응답(재시도 포함)이 끝나야
  *       다음 묶음을 보내므로, 재시도해도 파티션 안 순서가 뒤집히지 않는다</li>
  *   <li>ACK=0 이면 응답을 기다리지도, 재시도하지도 않는다</li>
+ *   <li>라우팅: 메타데이터(지도)를 보고 파티션 리더 브로커로 바로 보낸다. 실패하면 지도를 버리고 다시 받는다</li>
  * </ul>
  */
 public final class Producer implements AutoCloseable {
@@ -44,7 +41,7 @@ public final class Producer implements AutoCloseable {
     }
 
     private final Config cfg;
-    private final MiniMqHttp http;
+    private final ClusterView view;
     private final Map<String, Integer> partitionCounts = new ConcurrentHashMap<>();
     private final Map<TopicPartition, Batch> batches = new HashMap<>(); // this 로 보호
     private final Map<TopicPartition, ExecutorService> senders = new ConcurrentHashMap<>();
@@ -58,7 +55,7 @@ public final class Producer implements AutoCloseable {
 
     public Producer(Config cfg) {
         this.cfg = cfg;
-        this.http = new MiniMqHttp(cfg.bootstrap());
+        this.view = new ClusterView(cfg.bootstrap());
         long period = Math.max(1, cfg.lingerMs() / 2);
         ticker.scheduleAtFixedRate(this::flushLingered, period, period, TimeUnit.MILLISECONDS);
     }
@@ -108,7 +105,7 @@ public final class Producer implements AutoCloseable {
         ProduceRequest req = new ProduceRequest(b.tp.topic(), b.tp.partition(), cfg.acks(), b.records);
         if (cfg.acks() == 0) {
             try {
-                http.postAndForget("/produce", req);
+                view.leader(b.tp.topic(), b.tp.partition()).postAndForget("/produce", req);
             } catch (IOException ignored) {
                 // 재시도 없음. 손실을 감수한다
             }
@@ -120,14 +117,16 @@ public final class Producer implements AutoCloseable {
         IOException last = null;
         for (int attempt = 0; attempt <= cfg.retries(); attempt++) {
             try {
-                ProduceResponse res = http.post("/produce", req, ProduceResponse.class);
+                ProduceResponse res = view.leader(b.tp.topic(), b.tp.partition()).post("/produce", req, ProduceResponse.class);
                 for (int i = 0; i < b.futures.size(); i++) b.futures.get(i).complete(res.baseOffset() + i);
                 sentBatches.incrementAndGet();
                 sentRecords.addAndGet(b.records.size());
                 return;
             } catch (IOException e) {
                 // 타임아웃이면 브로커는 이미 저장했을 수도 있다 → 재시도하면 중복 (최소 한 번)
+                // 리더가 아니라는 답(409)이나 연결 실패면 지도가 낡았을 수 있으니 버리고 다시 받는다
                 last = e;
+                view.invalidate();
                 retries.incrementAndGet();
                 sleep(100L << Math.min(attempt, 5)); // 지수형 백오프
             }
@@ -139,9 +138,7 @@ public final class Producer implements AutoCloseable {
     private int partitions(String topic) {
         return partitionCounts.computeIfAbsent(topic, t -> {
             try {
-                List<TopicInfo> topics = http.get("/topics", new TypeReference<List<TopicInfo>>() {}, Duration.ofSeconds(5));
-                return topics.stream().filter(x -> x.name().equals(t)).findFirst()
-                        .orElseThrow(() -> new IllegalStateException("없는 토픽: " + t)).partitions();
+                return view.partitions(t);
             } catch (IOException e) {
                 throw new IllegalStateException("메타데이터를 못 가져옴", e);
             }

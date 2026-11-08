@@ -1,30 +1,52 @@
-# 1단계: 브로커 1대 + 생산자 1 + 소비자 그룹 2개
-#   대시보드  http://localhost:8081
+# 2단계: 브로커 3대가 Raft-lite 로 컨트롤러를 뽑는다 (주키퍼 없음) + 생산자 1 + 소비자 그룹 2
+#   대시보드  http://localhost:8081  (8082, 8083 도 같은 화면)
 name: mini-mq
+
+x-broker: &broker
+  build: { context: ., dockerfile: docker/Dockerfile, args: { MODULE: broker } }
+  image: mini-mq-broker
+  restart: unless-stopped
+
+x-broker-env: &broker-env
+  MINIMQ_PEERS: "1=http://broker-1:8080,2=http://broker-2:8080,3=http://broker-3:8080"
+  MINIMQ_DATA_DIR: /data
+  MINIMQ_SEGMENT_BYTES: "262144"   # 256KB 마다 새 세그먼트 (금방 쌓이는 걸 보려고)
+  MINIMQ_RETENTION_MS: "300000"    # 보관 5분 (교재는 2주)
+  MINIMQ_ELECTION_MIN_MS: "1500"   # 선거 타임아웃 1.5~3초 (눈으로 보려고 넉넉히)
+  MINIMQ_ELECTION_MAX_MS: "3000"
+  MINIMQ_HEARTBEAT_MS: "500"
+  MINIMQ_BROKER_DEAD_MS: "3000"
 
 x-demo: &demo
   build: { context: ., dockerfile: docker/Dockerfile, args: { MODULE: demo } }
   image: mini-mq-demo
   restart: unless-stopped
-  depends_on: [broker-1]
+  depends_on: [broker-1, broker-2, broker-3]
+
+x-bootstrap: &bootstrap "http://broker-1:8080,http://broker-2:8080,http://broker-3:8080"
 
 services:
   broker-1:
-    build: { context: ., dockerfile: docker/Dockerfile, args: { MODULE: broker } }
-    image: mini-mq-broker
-    environment:
-      MINIMQ_BROKER_ID: "1"
-      MINIMQ_DATA_DIR: /data
-      MINIMQ_SEGMENT_BYTES: "262144"   # 256KB 마다 새 세그먼트 (금방 쌓이는 걸 보려고)
-      MINIMQ_RETENTION_MS: "300000"    # 보관 5분 (교재는 2주)
+    <<: *broker
+    environment: { <<: *broker-env, MINIMQ_BROKER_ID: "1" }
     ports: ["8081:8080"]
     volumes: [broker-1:/data]
+  broker-2:
+    <<: *broker
+    environment: { <<: *broker-env, MINIMQ_BROKER_ID: "2" }
+    ports: ["8082:8080"]
+    volumes: [broker-2:/data]
+  broker-3:
+    <<: *broker
+    environment: { <<: *broker-env, MINIMQ_BROKER_ID: "3" }
+    ports: ["8083:8080"]
+    volumes: [broker-3:/data]
 
   producer:
     <<: *demo
     environment:
       DEMO_ROLE: producer
-      DEMO_BOOTSTRAP: http://broker-1:8080
+      DEMO_BOOTSTRAP: *bootstrap
       DEMO_TOPIC_PARTITIONS: "6"
       DEMO_SERVERS: "20"
       DEMO_RATE_PER_SEC: "200"
@@ -36,7 +58,7 @@ services:
     <<: *demo
     environment:
       DEMO_ROLE: consumer
-      DEMO_BOOTSTRAP: http://broker-1:8080
+      DEMO_BOOTSTRAP: *bootstrap
       DEMO_GROUP: search
       DEMO_COMMIT_MODE: after
       DEMO_CRASH_EVERY_SEC: "20"       # 20초마다 처리 도중 죽음 → dup 이 늘어난다
@@ -46,7 +68,7 @@ services:
     <<: *demo
     environment:
       DEMO_ROLE: consumer
-      DEMO_BOOTSTRAP: http://broker-1:8080
+      DEMO_BOOTSTRAP: *bootstrap
       DEMO_GROUP: anomaly
       DEMO_COMMIT_MODE: before
       DEMO_PROCESS_MS: "8"
@@ -54,3 +76,5 @@ services:
 
 volumes:
   broker-1:
+  broker-2:
+  broker-3:
