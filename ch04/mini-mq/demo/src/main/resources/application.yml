@@ -1,0 +1,11 @@
+spring:
+  application:
+    name: mini-mq-demo
+  main:
+    web-application-type: none
+  threads:
+    virtual:
+      enabled: true
+logging:
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level %msg%n"

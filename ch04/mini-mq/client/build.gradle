@@ -1,0 +1,4 @@
+// 프로듀서·컨슈머 클라이언트 라이브러리 (그림 4.12). 스프링에 기대지 않는다.
+dependencies {
+    api project(':common')
+}

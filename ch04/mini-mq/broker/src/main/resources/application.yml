@@ -1,0 +1,14 @@
+server:
+  port: 8080
+spring:
+  application:
+    name: mini-mq-broker
+  threads:
+    virtual:
+      enabled: true
+  mvc:
+    async:
+      request-timeout: 30s
+minimq:
+  broker-id: 1
+  data-dir: ./data/broker-1

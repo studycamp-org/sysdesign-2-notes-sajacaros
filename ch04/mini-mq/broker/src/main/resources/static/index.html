@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mini-mq 브로커</title>
+<style>
+  :root {
+    --bg: #faf7f2; --card: #ffffff; --ink: #2b2620; --muted: #8a8177; --line: #e6dfd5;
+    --seg: #d9cfc2; --active: #b5452f; --ok: #3f7d4e; --warn: #c07a12;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1d1a17; --card: #26221e; --ink: #ece6dd; --muted: #a39a8f; --line: #3a342e; --seg: #4a433b; --active: #e0664d; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif; }
+  header { padding: 16px 20px; border-bottom: 1px solid var(--line); display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; }
+  h1 { font-size: 18px; margin: 0; }
+  .meta { color: var(--muted); font-size: 13px; }
+  main { padding: 16px 20px; display: grid; gap: 20px; }
+  h2 { font-size: 15px; margin: 0 0 8px; }
+  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  .card h3 { margin: 0 0 6px; font-size: 14px; display: flex; justify-content: space-between; }
+  .nums { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .bar { display: flex; gap: 2px; height: 22px; margin: 8px 0 4px; }
+  .seg { background: var(--seg); border-radius: 3px; min-width: 6px; position: relative; }
+  .seg.active { background: var(--active); }
+  .legend { font-size: 12px; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  .lag0 { color: var(--ok); } .lagHi { color: var(--warn); font-weight: 600; }
+  .empty { color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>mini-mq 브로커 <span id="broker"></span></h1>
+  <span class="meta" id="cfg"></span>
+  <span class="meta" id="updated"></span>
+</header>
+<main>
+  <section>
+    <h2>파티션과 세그먼트</h2>
+    <div class="legend">막대 하나 = 세그먼트 파일 하나 (너비 = 크기). <b style="color:var(--active)">빨간 칸</b>이 지금 쓰는 활성 세그먼트. 앞쪽은 보관 기간이 지나면 지워진다.</div>
+    <div class="grid" id="partitions"></div>
+  </section>
+  <section>
+    <h2>소비자 그룹 오프셋</h2>
+    <div class="card"><table>
+      <thead><tr><th>그룹</th><th>토픽-파티션</th><th>마지막 소비 오프셋</th><th>lag</th></tr></thead>
+      <tbody id="groups"></tbody>
+    </table></div>
+  </section>
+</main>
+<script>
+const fmtBytes = b => b >= 1 << 20 ? (b / (1 << 20)).toFixed(1) + 'MB' : b >= 1024 ? (b / 1024).toFixed(0) + 'KB' : b + 'B';
+const fmtMs = ms => ms >= 86400000 ? (ms / 86400000).toFixed(0) + '일' : ms >= 60000 ? (ms / 60000).toFixed(0) + '분' : (ms / 1000).toFixed(0) + '초';
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+
+async function refresh() {
+  try {
+    const s = await (await fetch('/admin/state')).json();
+    document.getElementById('broker').textContent = '#' + s.brokerId;
+    document.getElementById('cfg').textContent = `세그먼트 ${fmtBytes(s.segmentBytes)} · 보관 ${fmtMs(s.retentionMs)}`;
+    document.getElementById('updated').textContent = '갱신 ' + new Date().toLocaleTimeString();
+
+    const parts = document.getElementById('partitions');
+    parts.innerHTML = s.partitions.length ? s.partitions.map(p => {
+      const total = p.segments.reduce((a, x) => a + x.bytes, 0) || 1;
+      const bars = p.segments.map(x =>
+        `<div class="seg ${x.active ? 'active' : ''}" style="flex:${Math.max(x.bytes, total * 0.02)}"
+              title="${esc(x.file)}&#10;offset ${x.baseOffset}~${x.baseOffset + x.count - 1} (${x.count}건, ${fmtBytes(x.bytes)})"></div>`).join('');
+      return `<div class="card">
+        <h3><span>${esc(p.topic)}-${p.partition}</span><span class="nums">${p.segments.length}개 세그먼트</span></h3>
+        <div class="bar">${bars}</div>
+        <div class="nums">logStart ${p.logStartOffset} · LEO ${p.logEndOffset} · ${p.logEndOffset - p.logStartOffset}건 보관</div>
+      </div>`;
+    }).join('') : '<div class="empty">아직 토픽이 없습니다.</div>';
+
+    const groups = document.getElementById('groups');
+    groups.innerHTML = s.groups.length ? s.groups.map(g =>
+      `<tr><td>${esc(g.group)}</td><td>${esc(g.topic)}-${g.partition}</td><td>${g.committed}</td>
+           <td class="${g.lag === 0 ? 'lag0' : g.lag > 1000 ? 'lagHi' : ''}">${g.lag}</td></tr>`).join('')
+      : '<tr><td colspan="4" class="empty">아직 커밋한 그룹이 없습니다.</td></tr>';
+  } catch (e) {
+    document.getElementById('updated').textContent = '브로커에 연결할 수 없음';
+  }
+}
+refresh();
+setInterval(refresh, 1000);
+</script>
+</body>
+</html>

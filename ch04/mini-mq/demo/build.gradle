@@ -1,0 +1,9 @@
+apply plugin: 'org.springframework.boot'
+
+dependencies {
+    implementation project(':client')
+    implementation 'org.springframework.boot:spring-boot-starter'
+}
+
+bootJar { archiveFileName = 'demo.jar' }
+jar { enabled = false }
