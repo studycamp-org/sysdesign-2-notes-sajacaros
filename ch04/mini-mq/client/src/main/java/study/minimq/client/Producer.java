@@ -40,8 +40,19 @@ public final class Producer implements AutoCloseable {
         }
     }
 
+    /** 버퍼에 담김 / 묶음을 리더에게 보냄을 알려 준다 (대시보드의 한 건 추적용). */
+    public interface Listener {
+        default void buffered(String key, TopicPartition tp, int partitions, int batchSizeNow) {
+        }
+
+        default void dispatched(TopicPartition tp, List<String> keys, int leaderId, long metadataVersion, int attempt) {
+        }
+    }
+
     private final Config cfg;
     private final ClusterView view;
+    private volatile Listener listener = new Listener() {
+    };
     private final Map<String, Integer> partitionCounts = new ConcurrentHashMap<>();
     private final Map<TopicPartition, Batch> batches = new HashMap<>(); // this 로 보호
     private final Map<TopicPartition, ExecutorService> senders = new ConcurrentHashMap<>();
@@ -58,7 +69,8 @@ public final class Producer implements AutoCloseable {
     public Producer(Config cfg) {
         this.cfg = cfg;
         this.view = new ClusterView(cfg.bootstrap());
-        long period = Math.max(1, cfg.lingerMs() / 2);
+        // linger 가 지난 묶음을 찾는 주기. 길게 잡으면(예전엔 linger/2) 10초 linger 가 최대 15초가 된다
+        long period = Math.max(1, Math.min(200, cfg.lingerMs() / 2));
         ticker.scheduleAtFixedRate(this::flushLingered, period, period, TimeUnit.MILLISECONDS);
     }
 
@@ -73,6 +85,7 @@ public final class Producer implements AutoCloseable {
         synchronized (this) {
             Batch b = batches.computeIfAbsent(tp, Batch::new);
             b.add(new ProduceRecord(key, value, System.currentTimeMillis()), f);
+            listener.buffered(key, tp, n, b.records.size());
             if (b.records.size() >= cfg.batchSize()) {
                 batches.remove(tp);
                 dispatch(b);
@@ -105,12 +118,47 @@ public final class Producer implements AutoCloseable {
                 .submit(() -> sendWithRetry(b));
     }
 
+    /** 버퍼에 아직 보내지 않고 모여 있는 묶음. */
+    public record BufferedBatch(String topic, int partition, List<String> keys, long ageMs) {
+    }
+
+    public synchronized List<BufferedBatch> buffered() {
+        long now = System.currentTimeMillis();
+        List<BufferedBatch> out = new ArrayList<>();
+        for (Batch b : batches.values()) {
+            out.add(new BufferedBatch(b.tp.topic(), b.tp.partition(), b.records.stream().map(ProduceRecord::key).toList(), now - b.createdAt));
+        }
+        return out;
+    }
+
+    /** 생산자가 캐시한 지도(메타데이터). */
+    public ClusterView view() {
+        return view;
+    }
+
+    public Config config() {
+        return cfg;
+    }
+
+    public void setListener(Listener l) {
+        this.listener = l;
+    }
+
+    private void announce(Batch b, int attempt) {
+        try {
+            listener.dispatched(b.tp, b.records.stream().map(ProduceRecord::key).toList(),
+                    view.leaderId(b.tp.topic(), b.tp.partition()), view.metadata().version(), attempt);
+        } catch (IOException ignored) {
+        }
+    }
+
     private void sendWithRetry(Batch b) {
         ProduceRequest req = new ProduceRequest(b.tp.topic(), b.tp.partition(), cfg.acks(), b.records);
         if (cfg.acks() == 0) {
             // ACK=0: 결과를 보지 않고 재시도도 없다. 다만 응답이 올 때까지는 다음 묶음을 보내지 않아
             // 같은 파티션 안 순서는 지킨다 (응답을 안 기다리고 마구 보내면 도착 순서가 뒤바뀔 수 있다)
             try {
+                announce(b, 0);
                 view.leader(b.tp.topic(), b.tp.partition()).post("/produce", req, Void.class);
             } catch (IOException ignored) {
                 view.invalidate(); // 손실을 감수한다
@@ -123,6 +171,7 @@ public final class Producer implements AutoCloseable {
         IOException last = null;
         for (int attempt = 0; attempt <= cfg.retries() && !Thread.currentThread().isInterrupted(); attempt++) {
             try {
+                announce(b, attempt);
                 ProduceResponse res = view.leader(b.tp.topic(), b.tp.partition()).post("/produce", req, ProduceResponse.class);
                 recordLatency(System.currentTimeMillis() - b.createdAt);
                 for (int i = 0; i < b.futures.size(); i++) b.futures.get(i).complete(res.baseOffset() + i);

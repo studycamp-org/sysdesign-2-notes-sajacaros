@@ -1,7 +1,7 @@
 # 3단계: 브로커 3대 (Raft-lite 컨트롤러 + 파티션마다 사본 3개)
-#   producer-web   → logs(ACK=1) · orders(ACK=all, 최소 ISR 2) · metrics(ACK=0)
-#   producer-batch → logs(ACK=1) · orders(ACK=all)
-#   소비자 그룹: search(logs ×3) · payment(orders ×4, 1명 놀기) · monitor(metrics ×2)
+#   producer-logs   → logs   (ACK=1,   최소 ISR 1) → 소비자 그룹 search  × 3
+#   producer-orders → orders (ACK=all, 최소 ISR 2) → 소비자 그룹 payment × 4 (1명 놀기)
+#   생산자는 대시보드 버튼을 누를 때만 보낸다
 #   대시보드  http://localhost:8081  (8082, 8083 도 같은 화면)
 name: mini-mq
 
@@ -19,6 +19,7 @@ x-broker-env: &broker-env
   MINIMQ_ELECTION_MAX_MS: "3000"
   MINIMQ_HEARTBEAT_MS: "500"
   MINIMQ_BROKER_DEAD_MS: "3000"
+  MINIMQ_PRODUCERS: "producer-logs=http://producer-logs:8080,producer-orders=http://producer-orders:8080"
   LOGGING_LEVEL_RAFT_RPC: ${RAFT_RPC_LOG:-INFO}   # RAFT_RPC_LOG=DEBUG ./run.sh 로 박동 송수신을 본다
   MINIMQ_REPLICA_LAG_TIME_MS: "4000"        # 4초 동안 안 가져가면 ISR 에서 뺀다
   MINIMQ_REPLICA_LAG_MAX_MESSAGES: "1000"   # 1000건 넘게 뒤처져도 뺀다
@@ -50,26 +51,39 @@ services:
     ports: ["8083:8080"]
     volumes: [broker-3:/data]
 
-  # 생산자는 여러 토픽에 보낸다. 토픽마다 acks·최소 ISR·속도가 다르다 (토픽:파티션수:acks:최소ISR:초당건수)
-  producer-web:
+  # 생산자 2개 = 토픽 2개. 자동으로 보내지 않고 대시보드 버튼을 받을 때만 보낸다.
+  # 버퍼: 파티션별 묶음이 5건이 되거나 10초가 지나면 리더에게 한 번에 보낸다
+  producer-logs:
     <<: *demo
     environment:
       <<: *demo-env
+      SPRING_MAIN_WEB_APPLICATION_TYPE: servlet
       DEMO_ROLE: producer
       DEMO_BOOTSTRAP: *bootstrap
-      DEMO_NAME: web
-      DEMO_TOPICS: "logs:6:1:1:150,orders:3:all:2:60,metrics:3:0:1:80"
+      DEMO_NAME: logs
+      DEMO_TOPIC: logs
+      DEMO_TOPIC_PARTITIONS: "3"
+      DEMO_ACKS: "1"
+      DEMO_MIN_INSYNC_REPLICAS: "1"
+      DEMO_BATCH_SIZE: "5"
+      DEMO_LINGER_MS: "10000"
 
-  producer-batch:
+  producer-orders:
     <<: *demo
     environment:
       <<: *demo-env
+      SPRING_MAIN_WEB_APPLICATION_TYPE: servlet
       DEMO_ROLE: producer
       DEMO_BOOTSTRAP: *bootstrap
-      DEMO_NAME: batch
-      DEMO_TOPICS: "logs:6:1:1:50,orders:3:all:2:40"
+      DEMO_NAME: orders
+      DEMO_TOPIC: orders
+      DEMO_TOPIC_PARTITIONS: "3"
+      DEMO_ACKS: all
+      DEMO_MIN_INSYNC_REPLICAS: "2"
+      DEMO_BATCH_SIZE: "5"
+      DEMO_LINGER_MS: "10000"
 
-  # 4단계: 소비자 그룹. search 그룹에 3명 → 파티션 6개를 2개씩 (range)
+  # 소비자 그룹 search 3명 → logs 파티션 3개를 1개씩
   # 처리 후 커밋(최소 한 번). gap 이 생기면 = ACK 를 받았는데 사라진 메시지
   # 늘리고 줄이기: docker compose up -d --scale consumer-logs=4
   consumer-logs:
@@ -93,18 +107,6 @@ services:
       DEMO_BOOTSTRAP: *bootstrap
       DEMO_TOPIC: orders
       DEMO_GROUP: payment
-      DEMO_COMMIT_MODE: after
-
-  # 지표: ACK=0 이라 장애 때 조용히 사라질 수 있다 → gap 으로 보인다
-  consumer-metrics:
-    <<: *demo
-    deploy: { replicas: 2 }
-    environment:
-      <<: *demo-env
-      DEMO_ROLE: consumer
-      DEMO_BOOTSTRAP: *bootstrap
-      DEMO_TOPIC: metrics
-      DEMO_GROUP: monitor
       DEMO_COMMIT_MODE: after
 
   # 1단계 실험(처리 도중 죽음 → 최대 한 번이면 gap, 최소 한 번이면 dup)을 다시 보려면

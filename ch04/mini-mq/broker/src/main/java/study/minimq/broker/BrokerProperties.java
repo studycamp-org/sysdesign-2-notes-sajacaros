@@ -7,6 +7,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
+ * @param producers       대시보드가 다룰 생산자 "producer-logs=http://producer-logs:8080,..." (대시보드용)
  * @param peers           클러스터 구성원 "1=http://broker-1:8080,2=..." (나 포함). 고정 멤버십
  * @param segmentBytes    활성 세그먼트가 이 크기를 넘으면 새 세그먼트를 연다
  * @param retentionMs     보관 기간. 교재는 2주, 데모는 짧게 잡아 세그먼트가 지워지는 걸 본다
@@ -26,6 +27,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 public record BrokerProperties(
         @DefaultValue("1") int brokerId,
         @DefaultValue("1=http://localhost:8080") String peers,
+        @DefaultValue("") String producers,
         @DefaultValue("./data") String dataDir,
         @DefaultValue("1048576") long segmentBytes,
         @DefaultValue("1209600000") long retentionMs,
@@ -40,6 +42,15 @@ public record BrokerProperties(
         @DefaultValue("6000") long sessionTimeoutMs,
         @DefaultValue("4000") long rebalanceTimeoutMs,
         @DefaultValue("1500") long initialRebalanceDelayMs) {
+
+    public Map<String, String> producerUrls() {
+        Map<String, String> m = new TreeMap<>();
+        for (String part : producers.split(",")) {
+            String[] kv = part.trim().split("=", 2);
+            if (kv.length == 2) m.put(kv[0].trim(), kv[1].trim());
+        }
+        return m;
+    }
 
     public Map<Integer, String> members() {
         Map<Integer, String> m = new TreeMap<>();

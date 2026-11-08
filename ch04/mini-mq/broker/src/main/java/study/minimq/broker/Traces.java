@@ -74,6 +74,12 @@ public class Traces {
         events.add(new Event(traceId, step, who, text, System.currentTimeMillis(), ++seq, props.brokerId()));
     }
 
+    /** 브로커 밖(생산자)에서 일어난 단계. broker 칸은 0, 시각·순서는 생산자가 잰 값. */
+    public synchronized void recordFromClient(String traceId, String step, String who, String text, long at, long clientSeq) {
+        if (!fired.add(traceId + "|" + step + "|" + who)) return;
+        events.add(new Event(traceId, step, who, text, at, clientSeq, 0));
+    }
+
     /** topic-partition 의 [from, to) 구간이 추적 중인 메시지를 지나갔으면 기록한다. */
     public void hit(String topic, int partition, long from, long to, String step, String who, String text) {
         List<Trace> matched = new ArrayList<>();

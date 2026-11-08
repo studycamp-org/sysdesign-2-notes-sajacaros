@@ -80,8 +80,21 @@ public class AdminApi {
             if (body != null) n.putAll(body);
             nodes.add(n);
         });
+        List<Map<String, Object>> producers = new ArrayList<>();
+        props.producerUrls().forEach((name, url) -> {
+            Map<String, Object> p = new LinkedHashMap<>();
+            p.put("name", name);
+            try {
+                p.putAll(new MiniMqHttp(url).get("/state", new TypeReference<Map<String, Object>>() {}, Duration.ofMillis(700)));
+                p.put("reachable", true);
+            } catch (IOException e) {
+                p.put("reachable", false);
+            }
+            producers.add(p);
+        });
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("servedBy", props.brokerId());
+        out.put("producers", producers);
         out.put("metadata", raft.committed());
         out.put("nodes", nodes);
         return out;
@@ -126,44 +139,22 @@ public class AdminApi {
         return Map.of(key, value);
     }
 
-    /**
-     * 📨 메시지 한 건 보내기: 이 브로커가 생산자 노릇을 한다. 키가 trace- 로 시작해서 지나가는 단계마다 기록된다.
-     * acks: 0 | 1 | all
-     */
-    @PostMapping("/admin/trace/send")
-    public Map<String, Object> traceSend(@RequestParam String topic, @RequestParam(defaultValue = "1") String acks) {
-        study.minimq.common.ClusterMetadata m = raft.committed();
-        study.minimq.common.TopicMetadata t = m.topics().get(topic);
-        if (t == null) throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND, "없는 토픽");
-        String id = Traces.PREFIX + Long.toString(System.currentTimeMillis() % 2_000_000_000L, 36);
-        int n = t.partitions().size();
-        int p = study.minimq.common.Partitioner.forKey(id, n);
-        int leader = t.partitions().get(p).leader();
-        traces.record(id, "map", "controller-" + m.controllerId(), "🗺 지도: 메타데이터 v" + m.version() + " (컨트롤러 broker-" + m.controllerId()
-                + " 가 그려 과반에 복제한 사본 분산 계획) — 지금 보는 건 broker-" + props.brokerId() + " 에 복제된 사본. 메시지는 컨트롤러를 거치지 않는다");
-        traces.record(id, "routed", "client", "📨 생산자: 키 \"" + id + "\" → hash(key) % " + n + " = 파티션 " + p
-                + " → 지도에서 그 파티션의 리더 broker-" + leader + " 를 찾아 바로 보냄");
-        traffic.record("📨 한 건", "produce", topic, p, 1, acks);
-        int acksValue = "all".equalsIgnoreCase(acks) ? -1 : Integer.parseInt(acks);
-        long t0 = System.currentTimeMillis();
-        try {
-            String url = m.leaderUrl(topic, p);
-            if (url == null) throw new IOException("리더 없음");
-            study.minimq.common.ProduceResponse res = new MiniMqHttp(url).post("/produce",
-                    new study.minimq.common.ProduceRequest(topic, p, acksValue,
-                            List.of(new study.minimq.common.ProduceRecord(id, "trace " + id, t0))),
-                    study.minimq.common.ProduceResponse.class, Duration.ofSeconds(10));
-            traces.record(id, "acked", "client", "📨 생산자: ACK 받음 (acks=" + acks + ", " + (System.currentTimeMillis() - t0)
-                    + "ms) — " + switch (acksValue) {
-                        case 0 -> "응답을 보긴 하지만 ACK=0 은 원래 결과를 확인하지 않는다";
-                        case 1 -> "리더가 저장하자마자 응답. 아직 복제 전일 수 있다";
-                        default -> "ISR 전원이 받아 HW 가 넘어간 뒤 응답";
-                    });
-            return Map.of("id", id, "topic", topic, "partition", p, "offset", res.baseOffset(), "leader", leader);
-        } catch (IOException e) {
-            traces.record(id, "failed", "client", "📨 생산자: 실패 — " + e.getMessage());
-            return Map.of("id", id, "error", String.valueOf(e.getMessage()));
-        }
+    /** 대시보드 버튼: 그 생산자에게 메시지 count 건을 보내라고 한다 (생산자는 따로 떠 있는 프로세스). */
+    @PostMapping("/admin/producers/{name}/send")
+    public Object producerSend(@org.springframework.web.bind.annotation.PathVariable String name,
+                               @RequestParam(defaultValue = "1") int count) throws IOException {
+        String url = props.producerUrls().get(name);
+        if (url == null) throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND, "없는 생산자");
+        return new MiniMqHttp(url).post("/send?count=" + count, Map.of(), Map.class, Duration.ofSeconds(5));
+    }
+
+    /** 생산자가 자기 안에서 일어난 단계(지도·버퍼·라우팅·ACK)를 남긴다. */
+    public record ClientEvent(String trace, String step, String who, String text, long at, long seq) {
+    }
+
+    @PostMapping("/admin/trace/event")
+    public void traceEvent(@org.springframework.web.bind.annotation.RequestBody ClientEvent e) {
+        traces.recordFromClient(e.trace(), e.step(), e.who(), e.text(), e.at(), e.seq());
     }
 
     @PostMapping("/admin/trace/register")

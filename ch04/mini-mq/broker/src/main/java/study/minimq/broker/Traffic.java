@@ -54,6 +54,7 @@ public class Traffic {
             m.put("topic", k.topic());
             m.put("partition", k.partition());
             m.put("rate", Math.round(sum * 1000.0 / WINDOW_MS));
+            m.put("reqRate", Math.round(c.samples.size() * 1000.0 / WINDOW_MS) == 0 && !c.samples.isEmpty() ? 1 : Math.round(c.samples.size() * 1000.0 / WINDOW_MS));
             m.put("agoMs", now - c.lastSeen);
             m.put("detail", c.detail);
             out.add(m);

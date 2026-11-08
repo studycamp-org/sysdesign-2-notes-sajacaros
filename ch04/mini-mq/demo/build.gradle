@@ -2,7 +2,7 @@ apply plugin: 'org.springframework.boot'
 
 dependencies {
     implementation project(':client')
-    implementation 'org.springframework.boot:spring-boot-starter'
+    implementation 'org.springframework.boot:spring-boot-starter-web' // 생산자는 대시보드 버튼을 받는 작은 HTTP 서버를 띄운다
 }
 
 bootJar { archiveFileName = 'demo.jar' }

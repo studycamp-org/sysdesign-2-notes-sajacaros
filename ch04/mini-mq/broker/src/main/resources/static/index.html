@@ -8,13 +8,13 @@
   :root {
     --bg: #faf7f2; --card: #ffffff; --ink: #2b2620; --muted: #8a8177; --line: #e6dfd5;
     --accent: #b5452f; --ok: #3f7d4e; --warn: #c07a12; --bad: #b3261e;
-    --route: #7a4fb0; --commit: #3f7d4e; --beat: #c99a1e; --data: #b5452f;
+    --data: #c99a1e; --ctrl: #1f8fa3;
     --b1: #2f6db5; --b2: #3f7d4e; --b3: #8a4fb0;
   }
   @media (prefers-color-scheme: dark) {
     :root { --bg: #1d1a17; --card: #26221e; --ink: #ece6dd; --muted: #a39a8f; --line: #3a342e;
             --accent: #e0664d; --ok: #6bbf7f; --warn: #e2a33d; --bad: #f2776d;
-            --route: #b48be0; --commit: #6bbf7f; --beat: #e6c25a; --data: #e0664d;
+            --data: #e2b545; --ctrl: #3fb6cb;
             --b1: #6ea4e6; --b2: #6bbf7f; --b3: #c08be0; }
   }
   * { box-sizing: border-box; }
@@ -22,7 +22,7 @@
   header { padding: 10px 20px; border-bottom: 1px solid var(--line); display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
   h1 { font-size: 17px; margin: 0; }
   .muted { color: var(--muted); font-size: 13px; }
-  main { padding: 12px 20px 30px; display: grid; gap: 16px; max-width: 1240px; }
+  main { padding: 12px 20px 30px; display: grid; gap: 16px; max-width: 1280px; }
   h2 { font-size: 13px; margin: 0 0 6px; color: var(--muted); font-weight: 600; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
   .tools { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; }
@@ -31,34 +31,35 @@
   button { font: inherit; font-size: 12px; padding: 2px 9px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer; }
   button:hover { border-color: var(--accent); }
   button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.send { background: var(--data); border-color: var(--data); color: #fff; font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  .sendbar { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; font-size: 13px; margin-bottom: 6px; }
+  .sendbar .grp { display: flex; gap: 4px; align-items: center; }
+  #banner { background: var(--card); border: 2px solid var(--line); border-radius: 8px; margin: 2px 0 6px; padding: 5px 10px;
+            font-size: 13px; line-height: 1.45; min-height: 34px; }
+  .flowwrap { position: relative; }
   svg { width: 100%; height: auto; display: block; }
   svg text { fill: var(--ink); font-family: inherit; }
+  #overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
   .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 6px; }
   .legend i { display: inline-block; width: 22px; height: 0; border-top: 3px solid; vertical-align: middle; margin-right: 4px; }
   @keyframes flow { to { stroke-dashoffset: -28; } }
   .anim { animation: flow linear infinite; }
+  .kind { font-size: 11px; font-weight: 700; padding: 0 6px; border-radius: 8px; color: #fff; margin-right: 4px; white-space: nowrap; }
   table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
   th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); font-size: 13px; }
   th { color: var(--muted); font-weight: 500; font-size: 12px; }
   td.num, th.num { text-align: right; }
   .events td:first-child { white-space: nowrap; color: var(--muted); width: 1%; }
-  details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
-  .bad { color: var(--bad); font-weight: 600; }
-  .flowbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; margin-bottom: 6px; }
-  .flowbar select { font: inherit; font-size: 12px; padding: 1px 4px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
-  .flowbar .sep { width: 1px; height: 18px; background: var(--line); }
-  button.send { background: #c99a1e; border-color: #c99a1e; color: #fff; font-weight: 600; }
-  .trace td { font-size: 13px; padding: 3px 8px; vertical-align: top; }
-  .trace td:first-child { white-space: nowrap; color: var(--muted); width: 1%; text-align: right; font-variant-numeric: tabular-nums; }
-  .trace .wait td { color: var(--muted); font-style: italic; }
-  .flowwrap { position: relative; }
-  #overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-  #banner { background: var(--card); border: 2px solid; border-radius: 8px; margin: 2px 0 6px;
-            padding: 5px 10px; font-size: 13px; line-height: 1.45; display: none; }
-  .kind { font-size: 11px; font-weight: 700; padding: 0 6px; border-radius: 8px; color: #fff; margin-right: 4px; white-space: nowrap; }
+  .trace td { vertical-align: top; }
+  .trace td:first-child { white-space: nowrap; color: var(--muted); width: 1%; text-align: right; }
   .trace tr.future { opacity: .3; }
   .trace tr.cur td { font-weight: 700; }
+  .trace .wait td { color: var(--muted); font-style: italic; }
   .tctl { display: inline-flex; gap: 6px; margin-left: 10px; vertical-align: middle; font-weight: 400; }
+  .tctl select { font: inherit; font-size: 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+  details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  .bad { color: var(--bad); font-weight: 600; }
   .two { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   @media (max-width: 900px) { .two { grid-template-columns: 1fr; } }
 </style>
@@ -71,30 +72,16 @@
 </header>
 <main>
   <section class="card">
-    <div class="flowbar">
-      <button id="auto" onclick="toggleAuto()" title="생산자들의 자동 생산을 켜고 끈다 (클러스터 설정 demo.autoProduce, 컨트롤러가 복제)">…</button>
-      <span class="sep"></span>
-      <span>📨 한 건 보내기</span>
-      <select id="tTopic" title="토픽"></select>
-      <select id="tAcks" title="acks"><option value="1">acks=1</option><option value="all">acks=all</option><option value="0">acks=0</option></select>
-      <button class="send" onclick="sendOne()">보내기</button>
-      <span class="muted" id="tMsg"></span>
-      <span class="sep"></span>
-      <label title="흐르는 점선의 속도. 실제 처리 속도는 그대로">흐름 애니메이션 <select id="speed" onchange="SPEED = Number(this.value)">
-        <option value="1">1×</option><option value="0.5">½×</option><option value="0.25">¼×</option></select></label>
-    </div>
-    <div id="banner"></div>
+    <div class="sendbar" id="sendbar"></div>
+    <div id="banner"><span class="muted">위 버튼으로 메시지를 보내면 그 한 건이 지나가는 단계를 천천히 보여 준다. 생산자는 같은 파티션 묶음이 5건이 차거나 10초가 지나야 실제로 보낸다.</span></div>
     <div class="flowwrap">
-      <svg id="flow" viewBox="0 0 1100 600" role="img" aria-label="생산자에서 소비자까지의 흐름과 컨트롤러"></svg>
-      <svg id="overlay" viewBox="0 0 1100 600" aria-hidden="true"></svg>
+      <svg id="flow" viewBox="0 0 1160 600" role="img" aria-label="생산자 → 브로커(파티션 사본) → 소비자 그룹"></svg>
+      <svg id="overlay" viewBox="0 0 1160 600" aria-hidden="true"></svg>
     </div>
     <div class="legend">
-      <span><i style="border-color:var(--data)"></i>메시지 (굵기 = 초당 건수)</span>
-      <span><i style="border-color:var(--beat);border-top-style:dashed"></i>컨트롤러 박동 + 메타데이터 복제</span>
-      <span><i style="border-color:var(--route);border-top-style:dotted"></i>지도(메타데이터) 받기 = 라우팅</span>
-      <span><i style="border-color:var(--commit);border-top-style:dotted"></i>그룹 → 코디네이터 브로커 (박동·합류·커밋)</span>
-      <span>📨 한 건: <i style="border-color:#c99a1e"></i>데이터 (메시지가 움직임) · <i style="border-color:#1f8fa3;border-top-style:dashed"></i>컨트롤 (지도·HW·ACK·커밋)</span>
-      <span>사본 칸: <b>꽉 참</b> ISR · <b>점선</b> ISR 밖 · ★ 리더 · 칸 위 화살표 = 복제 (주황 뒤처짐 · 빨강 ISR 밖)</span>
+      <span><i style="border-color:var(--data)"></i>데이터: 메시지가 움직임 (생산 · 복제 · 소비)</span>
+      <span><i style="border-color:var(--ctrl);border-top-style:dashed"></i>컨트롤: 박동 · 지도(메타데이터) · HW · ACK · 오프셋 커밋</span>
+      <span>사본 줄: <b>★</b> 리더 · 실선 ISR · 점선 ISR 밖 · 같은 색 = 같은 파티션</span>
     </div>
   </section>
 
@@ -102,14 +89,14 @@
     <section>
       <h2>📨 한 건의 여정 <span class="muted" id="trTitle"></span>
         <span class="tctl">
-          <button onclick="startReplay()" title="기록된 단계를 처음부터 천천히 다시 보여 준다">▶ 천천히 재생</button>
+          <button onclick="startReplay()" title="기록된 단계를 처음부터 천천히 다시 보여 준다">▶ 다시 재생</button>
           <button onclick="pauseReplay()">⏸</button>
           <button onclick="nextStep()" title="한 단계씩">⏭ 다음</button>
           <button onclick="stopReplay()" title="재생을 그만두고 전부 보기">■</button>
           <select id="stepMs" onchange="replay.stepMs = Number(this.value)" title="단계 사이 간격">
             <option value="2600">느리게</option><option value="1600" selected>보통</option><option value="800">빠르게</option></select>
         </span></h2>
-      <div class="card"><table class="trace"><tbody id="trace"><tr class="wait"><td></td><td>위의 "보내기"를 누르면 메시지 하나가 지나가는 단계가 여기 나온다. 자동 생산을 끄면 그림에서도 그 한 건만 보인다.</td></tr></tbody></table></div>
+      <div class="card"><table class="trace"><tbody id="trace"><tr class="wait"><td></td><td>아직 보낸 메시지가 없다.</td></tr></tbody></table></div>
       <h2 style="margin-top:14px">이벤트</h2>
       <div class="card"><table class="events"><tbody id="events"></tbody></table></div>
     </section>
@@ -127,186 +114,47 @@
   </div>
 </main>
 <script>
-const C = id => `var(--b${((id - 1) % 3) + 1})`;
+// ------------------------------------------------------------------ 공통
+const C = id => id > 0 ? `var(--b${((id - 1) % 3) + 1})` : 'var(--muted)';
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
 const time = ms => new Date(ms).toLocaleTimeString([], {hour12: false});
 const width = r => 1.2 + 2.4 * Math.log10(1 + r);
-// 다시 그려도 애니메이션이 끊기지 않게 시계 기준으로 위상을 맞춘다
 const anim = (r) => {
   if (!r) return '';
-  const dur = Math.max(0.35, 2.4 - 0.75 * Math.log10(1 + r)) / SPEED;
+  const dur = Math.max(0.35, 2.4 - 0.75 * Math.log10(1 + r));
   return `class="anim" style="animation-duration:${dur}s;animation-delay:-${(Date.now() / 1000) % dur}s"`;
 };
 const curve = (x1, y1, x2, y2) => { const dx = (x2 - x1) * 0.5; return `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`; };
+// 같은 파티션의 사본은 같은 색 (토픽마다 색 계열을 달리)
+const PART_HUE = {logs: [28, 52, 4], orders: [200, 170, 232]};
+const partColor = (topic, p) => `hsl(${(PART_HUE[topic] || [280, 310, 250])[p % 3] + 40 * Math.floor(p / 3)} 62% 48%)`;
 
-const TRACE_COLOR = {data: '#c99a1e', ctrl: '#1f8fa3'};
-// 데이터 = 메시지 자체가 움직이는 단계, 컨트롤 = 메시지에 관한 정보(지도·HW)나 응답(ACK)·오프셋이 오가는 단계
-const STEP_KIND = {map: 'ctrl', routed: 'data', stored: 'data', replicated: 'data', hw: 'ctrl', acked: 'ctrl', fetched: 'data', committed: 'ctrl', failed: 'ctrl'};
-const STEP_ICON = {map: '🗺', routed: '🧭', stored: '💾', replicated: '📋', hw: '✅', acked: '📬', fetched: '📥', committed: '📌', failed: '❌'};
-const kindTag = k => `<span class="kind" style="background:${TRACE_COLOR[k]}">${k === 'data' ? '데이터' : '컨트롤'}</span>`;
-let SPEED = 1;            // 흐름 애니메이션 배속
-let SEG = {};             // 마지막으로 그린 한 건의 경로 좌표 (재생용)
+// 데이터 = 메시지 자체가 움직이는 단계, 컨트롤 = 지도·HW·ACK·오프셋 커밋처럼 메시지에 관한 정보·응답이 오가는 단계
+const STEP_KIND = {map: 'ctrl', buffered: 'data', dispatched: 'data', stored: 'data', replicated: 'data', hw: 'ctrl', acked: 'ctrl', fetched: 'data', committed: 'ctrl', failed: 'ctrl'};
+const STEP_ICON = {map: '🗺', buffered: '🧺', dispatched: '🧭', stored: '💾', replicated: '📋', hw: '✅', acked: '📬', fetched: '📥', committed: '📌', failed: '❌'};
+const kindTag = k => `<span class="kind" style="background:var(--${k})">${k === 'data' ? '데이터' : '컨트롤'}</span>`;
+
+let SEG = {};
 let lastState = null;
 const replay = {on: false, k: 0, playing: false, timer: null, stepMs: 1600};
-let currentTrace = new URLSearchParams(location.search).get('trace'); // ?trace=trace-xxxx 로 특정 한 건을 열 수 있다
+let currentTrace = new URLSearchParams(location.search).get('trace');
 
-async function toggleAuto() {
-  const b = document.getElementById('auto');
-  const next = b.dataset.state === 'off' ? 'on' : 'off';
-  b.disabled = true;
-  await fetch(`/admin/settings?key=demo.autoProduce&value=${next}`, {method: 'POST'}).catch(() => {});
-  b.disabled = false;
-  refresh();
-}
-
-async function sendOne() {
-  const topic = document.getElementById('tTopic').value, acks = document.getElementById('tAcks').value;
-  const msg = document.getElementById('tMsg');
-  msg.textContent = '보내는 중…';
-  try {
-    const r = await (await fetch(`/admin/trace/send?topic=${encodeURIComponent(topic)}&acks=${acks}`, {method: 'POST'})).json();
-    currentTrace = r.id;
-    msg.textContent = r.error ? `실패: ${r.error}` : `${r.id} → ${topic}-${r.partition} offset ${r.offset}`;
-  } catch (e) { msg.textContent = '실패'; }
-  stopReplay();
-  await refresh();
-  setTimeout(startReplay, 600); // 기록이 모이는 대로 천천히 보여 준다
-
-}
-
-function flowbar(meta) {
-  const on = (meta.settings || {})['demo.autoProduce'] !== 'off';
-  const b = document.getElementById('auto');
-  b.dataset.state = on ? 'on' : 'off';
-  b.className = on ? '' : 'on';
-  b.textContent = on ? '⏸ 자동 생산 끄기' : '▶ 자동 생산 켜기 (지금 꺼짐)';
-  const sel = document.getElementById('tTopic');
-  const names = Object.keys(meta.topics).filter(t => !t.startsWith('__')).sort();
-  if (sel.options.length !== names.length) {
-    const cur = sel.value;
-    sel.innerHTML = names.map(n => `<option>${esc(n)}</option>`).join('');
-    if (names.includes(cur)) sel.value = cur;
-  }
-}
-
-/** 모든 브로커의 추적 기록에서 지금 보는 한 건을 모은다. */
-function traceOf(s) {
-  if (!currentTrace) return null;
-  const up = s.nodes.filter(n => n.reachable);
-  const t = up.flatMap(n => (n.trace || {}).traces || []).find(x => x.id === currentTrace);
-  const events = up.flatMap(n => ((n.trace || {}).events || []).filter(e => e.trace === currentTrace))
-    .sort((a, b) => a.at - b.at || (a.broker === b.broker ? a.seq - b.seq : 0));
-  const seen = new Set();
-  const uniq = events.filter(e => { const k = e.step + '|' + e.who; if (seen.has(k)) return false; seen.add(k); return true; });
-  const done = uniq.some(e => e.step === 'committed' || e.step === 'failed') || (uniq.length && Date.now() - uniq[0].at > 15000);
-  return {id: currentTrace, t, events: uniq, all: uniq, done,
-    key: t ? `${t.topic}-${t.partition}` : null,
-    has: (step, who) => uniq.some(e => e.step === step && (who === undefined || e.who === who))};
-}
-
-/** 재생 중이면 지금 단계까지만 보이게 한다. */
-function visibleTrace(tr) {
-  if (!tr || !replay.on) return tr;
-  const ev = tr.all.slice(0, replay.k);
-  return {...tr, events: ev, has: (step, who) => ev.some(e => e.step === step && (who === undefined || e.who === who))};
-}
-
-// ---------------- 천천히 재생: 기록된 단계를 하나씩, 점을 경로 위로 움직이며
-function startReplay() {
-  if (!lastState || !traceOf(lastState)) return;
-  pauseReplay();
-  replay.on = true; replay.k = 0; replay.playing = true;
-  stepNext();
-}
-function pauseReplay() { replay.playing = false; clearTimeout(replay.timer); }
-function nextStep() {
-  pauseReplay();
-  if (!replay.on) { replay.on = true; replay.k = 0; }
-  stepNext(true);
-}
-function stopReplay() {
-  pauseReplay(); replay.on = false;
-  document.getElementById('overlay').innerHTML = '';
-  document.getElementById('banner').style.display = 'none';
-  if (lastState) { draw(lastState); traceView(lastState, traceOf(lastState)); }
-}
-function stepNext(manual) {
-  const tr = lastState && traceOf(lastState);
-  if (!tr) return;
-  if (replay.k >= tr.all.length) {
-    if (tr.done) { replay.playing = false; banner(null, `끝: ${tr.all.length}단계, 실제로는 ${tr.all.at(-1).at - tr.all[0].at}ms 걸렸다`, 'data'); return; }
-    if (replay.playing || manual) replay.timer = setTimeout(() => stepNext(manual), 400); // 아직 기록이 오는 중
-    return;
-  }
-  const e = tr.all[replay.k++];
-  draw(lastState); traceView(lastState, tr);
-  playStep(e, tr);
-  if (replay.playing) replay.timer = setTimeout(stepNext, replay.stepMs);
-}
-function banner(e, text, kind) {
-  const b = document.getElementById('banner');
-  b.style.display = 'block';
-  b.style.borderColor = TRACE_COLOR[kind];
-  b.innerHTML = e ? `${kindTag(kind)} <b>${replay.k}.</b> ${STEP_ICON[e.step] || ''} ${esc(e.text)} <span class="muted">(실제 +${e.at - lastState._t0}ms)</span>` : esc(text);
-}
-function playStep(e, tr) {
-  const kind = STEP_KIND[e.step] || 'ctrl', color = TRACE_COLOR[kind];
-  lastState._t0 = tr.all[0].at;
-  banner(e, '', kind);
-  const ov = document.getElementById('overlay');
-  const seg = SEG[e.step + '|' + e.who] || SEG[e.step === 'acked' ? 'routed' : e.step];
-  const dur = replay.stepMs * 0.75;
-  if (Array.isArray(seg)) { // 한 점에서 일어나는 단계: 퍼지는 고리
-    const [x, y] = seg;
-    ov.innerHTML = `<circle id="ring" cx="${x}" cy="${y}" r="6" fill="none" stroke="${color}" stroke-width="3"/><circle cx="${x}" cy="${y}" r="6" fill="${color}"/>`;
-    const ring = ov.querySelector('#ring'), t0 = performance.now();
-    const tick = now => { const t = ((now - t0) % 700) / 700; ring.setAttribute('r', 6 + 18 * t); ring.setAttribute('opacity', 1 - t);
-      if (now - t0 < dur) requestAnimationFrame(tick); };
-    requestAnimationFrame(tick);
-    return;
-  }
-  if (!seg) { ov.innerHTML = ''; return; }
-  const back = e.step === 'acked'; // ACK 는 리더에서 생산자 쪽으로 거꾸로 온다
-  ov.innerHTML = `<path id="rp" d="${seg}" fill="none" stroke="${color}" stroke-width="5" stroke-opacity=".35" stroke-dasharray="${kind === 'ctrl' ? '6 5' : ''}"/>
-    <circle id="dot" r="8" fill="${color}" stroke="#fff" stroke-width="2"/>`;
-  const path = ov.querySelector('#rp'), dot = ov.querySelector('#dot');
-  const len = path.getTotalLength(), t0 = performance.now();
-  const tick = now => {
-    const t = Math.min(1, (now - t0) / dur), u = back ? 1 - t : t;
-    const ease = u < .5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
-    const pt = path.getPointAtLength(len * ease);
-    dot.setAttribute('cx', pt.x); dot.setAttribute('cy', pt.y);
-    if (t < 1) requestAnimationFrame(tick);
-  };
-  requestAnimationFrame(tick);
-}
-
-function traceView(s, tr) {
-  const body = document.getElementById('trace');
-  if (!tr) return;
-  document.getElementById('trTitle').textContent = tr.t ? `${tr.id} · ${tr.t.topic}-${tr.t.partition} offset ${tr.t.offset}` : tr.id;
-  const all = tr.all || tr.events;
-  const t0 = all.length ? all[0].at : 0;
-  let rows = all.map((e, i) => {
-    const k = STEP_KIND[e.step] || 'ctrl';
-    const cls = !replay.on ? '' : i >= replay.k ? 'future' : i === replay.k - 1 ? 'cur' : '';
-    return `<tr class="${cls}"><td>+${e.at - t0}ms</td><td>${kindTag(k)}${STEP_ICON[e.step] || '•'} <span class="dot" style="background:${C(e.broker)}" title="broker-${e.broker} 에서 기록"></span> ${esc(e.text)}</td></tr>`;
-  }).join('');
-  const waits = [];
-  if (tr.t && !replay.on) {
-    const p = (s.metadata.topics[tr.t.topic] || {partitions: []}).partitions[tr.t.partition];
-    if (p) p.isr.filter(id => id !== p.leader && !tr.has('replicated', 'broker-' + id)).forEach(id => waits.push(`broker-${id} 의 복제를 기다리는 중`));
-    if (!tr.has('hw')) waits.push('HW 가 넘어가길 기다리는 중 (그 전엔 소비자에게 안 보인다)');
-    if (!tr.has('fetched')) waits.push('소비자가 가져가길 기다리는 중');
-    else if (!tr.has('committed')) waits.push('소비자 그룹의 오프셋 커밋을 기다리는 중');
-  }
-  rows += waits.map(w => `<tr class="wait"><td>…</td><td>${esc(w)}</td></tr>`).join('');
-  body.innerHTML = rows || '<tr class="wait"><td></td><td>기록을 모으는 중…</td></tr>';
-}
-
+// ------------------------------------------------------------------ 버튼
 async function act(action, id, value) {
   await fetch(`/admin/cluster/${action}?id=${id}` + (value !== undefined ? `&value=${value}` : ''), {method: 'POST'}).catch(() => {});
   setTimeout(refresh, 300);
+}
+
+async function sendFrom(name, count) {
+  try {
+    const r = await (await fetch(`/admin/producers/${encodeURIComponent(name)}/send?count=${count}`, {method: 'POST'})).json();
+    if (r.ids && r.ids.length) {
+      currentTrace = r.ids[r.ids.length - 1]; // 마지막 한 건을 따라간다
+      stopReplay();
+      await refresh();
+      setTimeout(startReplay, 300);
+    }
+  } catch (e) { banner(null, `${name} 에 보내기 실패`, 'ctrl'); }
 }
 
 function tools(nodes) {
@@ -320,272 +168,356 @@ function tools(nodes) {
   }).join('');
 }
 
+function sendbar(s) {
+  const el = document.getElementById('sendbar');
+  const html = (s.producers || []).map(p => `<span class="grp">📨 <b>${esc(p.name)}</b> → ${esc(p.topic || '?')} (acks=${esc(p.acks || '?')})
+      <button class="send" ${p.reachable && p.ready ? '' : 'disabled'} onclick="sendFrom('${esc(p.name)}', 1)">1건</button>
+      <button class="send" ${p.reachable && p.ready ? '' : 'disabled'} onclick="sendFrom('${esc(p.name)}', 5)" title="같은 파티션 묶음이 차면 바로 나간다">5건</button></span>`).join('');
+  if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
+}
+
+// ------------------------------------------------------------------ 한 건 추적
+function traceOf(s) {
+  if (!currentTrace || !s) return null;
+  const up = s.nodes.filter(n => n.reachable);
+  const t = up.flatMap(n => (n.trace || {}).traces || []).find(x => x.id === currentTrace);
+  const events = up.flatMap(n => ((n.trace || {}).events || []).filter(e => e.trace === currentTrace))
+    .sort((a, b) => a.at - b.at || (a.broker === b.broker ? a.seq - b.seq : 0));
+  const seen = new Set();
+  const all = events.filter(e => { const k = e.step + '|' + e.who; if (seen.has(k)) return false; seen.add(k); return true; });
+  const done = all.some(e => e.step === 'committed' || e.step === 'failed') || (all.length && Date.now() - all[0].at > 30000);
+  return {id: currentTrace, t, all, events: all, done, key: t ? `${t.topic}-${t.partition}` : null,
+    has: (step, who) => all.some(e => e.step === step && (who === undefined || e.who === who))};
+}
+function visibleTrace(tr) {
+  if (!tr || !replay.on) return tr;
+  const ev = tr.all.slice(0, replay.k);
+  return {...tr, events: ev, has: (step, who) => ev.some(e => e.step === step && (who === undefined || e.who === who))};
+}
+
+// ------------------------------------------------------------------ 천천히 재생
+function startReplay() {
+  if (!lastState || !traceOf(lastState)) return;
+  pauseReplay();
+  replay.on = true; replay.k = 0; replay.playing = true;
+  stepNext();
+}
+function pauseReplay() { replay.playing = false; clearTimeout(replay.timer); }
+function nextStep() { pauseReplay(); if (!replay.on) { replay.on = true; replay.k = 0; } stepNext(true); }
+function stopReplay() {
+  pauseReplay(); replay.on = false;
+  document.getElementById('overlay').innerHTML = '';
+  if (lastState) { draw(lastState); traceView(lastState, traceOf(lastState)); }
+}
+function stepNext(manual) {
+  const tr = traceOf(lastState);
+  if (!tr) return;
+  if (replay.k >= tr.all.length) {
+    if (tr.done) { replay.playing = false; banner(null, `끝: ${tr.all.length}단계, 실제로는 ${tr.all.at(-1).at - tr.all[0].at}ms 걸렸다`, 'data'); return; }
+    const last = tr.all.at(-1);
+    if (last && last.step === 'buffered') banner(null, '⏳ 생산자 버퍼에서 기다리는 중: 같은 파티션 묶음이 5건이 차거나 10초가 지나면 보낸다', 'data');
+    if (replay.playing || manual) replay.timer = setTimeout(() => stepNext(manual), 400);
+    return;
+  }
+  const e = tr.all[replay.k++];
+  draw(lastState); traceView(lastState, tr);
+  playStep(e, tr);
+  if (replay.playing) replay.timer = setTimeout(stepNext, replay.stepMs);
+}
+function banner(e, text, kind, t0) {
+  const b = document.getElementById('banner');
+  b.style.borderColor = `var(--${kind})`;
+  b.innerHTML = e ? `${kindTag(kind)} <b>${replay.k}.</b> ${STEP_ICON[e.step] || ''} ${esc(e.text)} <span class="muted">(실제 +${e.at - t0}ms)</span>` : esc(text);
+}
+function playStep(e, tr) {
+  const kind = STEP_KIND[e.step] || 'ctrl';
+  banner(e, '', kind, tr.all[0].at);
+  const ov = document.getElementById('overlay');
+  const seg = SEG[e.step + '|' + e.who] || SEG[e.step === 'acked' ? 'dispatched' : e.step];
+  const dur = replay.stepMs * 0.75, color = `var(--${kind})`;
+  if (Array.isArray(seg)) {
+    const [x, y] = seg;
+    ov.innerHTML = `<circle id="ring" cx="${x}" cy="${y}" r="6" fill="none" stroke="${color}" stroke-width="3"/><circle cx="${x}" cy="${y}" r="7" fill="${color}" stroke="#fff" stroke-width="2"/>`;
+    const ring = ov.querySelector('#ring'), t0 = performance.now();
+    const tick = now => { const t = ((now - t0) % 700) / 700; ring.setAttribute('r', 7 + 18 * t); ring.setAttribute('opacity', 1 - t); if (now - t0 < dur) requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+    return;
+  }
+  if (!seg) { ov.innerHTML = ''; return; }
+  const back = e.step === 'acked'; // ACK 는 리더에서 생산자 쪽으로 거꾸로 온다
+  ov.innerHTML = `<path id="rp" d="${seg}" fill="none" stroke="${color}" stroke-width="6" stroke-opacity=".3" stroke-dasharray="${kind === 'ctrl' ? '6 5' : ''}"/>
+    <circle id="dot" r="8" fill="${color}" stroke="#fff" stroke-width="2"/>`;
+  const path = ov.querySelector('#rp'), dot = ov.querySelector('#dot');
+  const len = path.getTotalLength(), t0 = performance.now();
+  const tick = now => {
+    const t = Math.min(1, (now - t0) / dur), u = back ? 1 - t : t;
+    const ease = u < .5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+    const pt = path.getPointAtLength(len * ease);
+    dot.setAttribute('cx', pt.x); dot.setAttribute('cy', pt.y);
+    if (t < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+// ------------------------------------------------------------------ 그림
 function draw(s) {
-  const meta = s.metadata, nodes = s.nodes;
+  const meta = s.metadata, nodes = s.nodes, up = nodes.filter(n => n.reachable);
   const tr = visibleTrace(traceOf(s));
-  const GOLD = TRACE_COLOR.data, CTRL = TRACE_COLOR.ctrl;
-  const up = nodes.filter(n => n.reachable);
   const traffic = up.flatMap(n => (n.traffic || []).map(t => ({...t, broker: n.id})));
+  const live = traffic.filter(t => t.agoMs < 4000);
   const reps = {};
   up.forEach(n => (n.replicas || []).forEach(r => { (reps[`${r.topic}-${r.partition}`] ||= {})[n.id] = r; }));
-
-  // ---- 위: 컨트롤 플레인 (브로커 = Raft 구성원)
-  const BX = {}, BY = 70, BW = 180, BH = 78;
-  nodes.forEach((n, i) => { BX[n.id] = 550 + (i - (nodes.length - 1) / 2) * 240; });
-  let svg = '';
+  const shown = [...new Set((s.producers || []).map(p => p.topic).filter(t => meta.topics[t]))];
+  const topics = (shown.length ? shown : Object.keys(meta.topics).filter(t => !t.startsWith('__')).slice(0, 2)).map(t => meta.topics[t]);
   const ctrl = meta.controllerId;
-  nodes.forEach(n => {
-    if (n.id === ctrl || !n.reachable || !BX[ctrl]) return;
-    const x1 = BX[ctrl], x2 = BX[n.id];
-    svg += `<path d="M${x1},${BY - BH / 2} Q${(x1 + x2) / 2},${BY - BH / 2 - 34} ${x2},${BY - BH / 2}" fill="none" stroke="var(--beat)" stroke-width="2" stroke-dasharray="5 9" ${anim(4)}/>`;
-  });
-  if (BX[ctrl]) svg += `<text x="${BX[ctrl]}" y="${BY - BH / 2 - 22}" text-anchor="middle" font-size="11" fill="var(--muted)">박동 · 메타데이터 v${meta.version}</text>`;
-  nodes.forEach(n => {
-    const x = BX[n.id], info = meta.brokers[n.id] || {};
-    const r = n.reachable ? n.raft : null;
-    const leads = Object.values(meta.topics).filter(t => !t.name.startsWith('__')).flatMap(t => t.partitions.filter(p => p.leader === n.id)).length;
+  const coordOf = {}; // 그룹 → 코디네이터 브로커
+  up.forEach(n => (n.groups || []).forEach(g => { coordOf[g.group] = n.id; }));
+  let back = '', mid = '', front = '', tracePath = '';
+  SEG = {};
+
+  // ---- 가운데: 브로커 상자 안에 사본
+  const PX = 600, PW = 340, HEADH = 50, RH = 32, TOPH = 20;
+  const BOX = {}, ROW = {};
+  let y = 30;
+  Object.keys(meta.brokers).map(Number).sort((a, b) => a - b).forEach(b => {
+    const n = nodes.find(x => x.id === b) || {id: b};
+    const r = n.reachable ? n.raft : null, info = meta.brokers[b] || {};
+    const sections = topics.map(t => ({t, parts: t.partitions.filter(p => p.replicas.includes(b))})).filter(x => x.parts.length);
+    const h = HEADH + sections.reduce((a, x) => a + TOPH + x.parts.length * RH, 0) + 8;
+    BOX[b] = {y, h};
     const flags = [];
     if (!n.reachable) flags.push(['응답 없음', 'var(--bad)']);
     else {
       if (r.isolated) flags.push(['🔌 고립', 'var(--bad)']);
       if (info.alive === false) flags.push(['죽음 표시', 'var(--bad)']);
       if (n.replicationDelayMs) flags.push([`🐢 ${n.replicationDelayMs / 1000}초`, 'var(--warn)']);
-      if (r.acceptedVersion !== r.committedVersion) flags.push([`미커밋 v${r.acceptedVersion}`, 'var(--warn)']);
     }
-    const role = !r ? '' : r.role === 'LEADER' ? '👑 컨트롤러' : r.role === 'CANDIDATE' ? '🗳 후보' : '';
-    svg += `<g opacity="${n.reachable && !r.isolated ? 1 : 0.45}">
-      <rect x="${x - BW / 2}" y="${BY - BH / 2}" width="${BW}" height="${BH}" rx="10" fill="var(--card)" stroke="${C(n.id)}" stroke-width="${n.id === ctrl ? 3 : 1.5}"/>
-      <text x="${x}" y="${BY - 14}" text-anchor="middle" font-weight="700">broker-${n.id} ${role}</text>
-      <text x="${x}" y="${BY + 4}" text-anchor="middle" font-size="12" fill="var(--muted)">${r ? `term ${r.term} · 리더 파티션 ${leads}개` : ''}</text>
-      <text x="${x}" y="${BY + 22}" text-anchor="middle" font-size="12" font-weight="600">${flags.map(([t, c]) => `<tspan fill="${c}">${esc(t)} </tspan>`).join('')}</text></g>`;
-  });
-
-  // ---- 아래: 데이터 플레인 (생산자 → 파티션 → 소비자)
-  const PX = 550, PW = 250, PH = 38, GAP = 8, TOP = 190;
-  const PY = {};
-  let y = TOP;
-  const topics = Object.values(meta.topics).filter(t => !t.name.startsWith('__')).sort((a, b) => a.name.localeCompare(b.name));
-  let parts = '';
-  topics.forEach(t => {
-    parts += `<text x="${PX - PW / 2}" y="${y + 4}" font-size="12" font-weight="700" fill="var(--muted)">${esc(t.name)} · 사본 ${t.replicationFactor} · 최소 ISR ${t.minInsyncReplicas}</text>`;
-    y += 14;
-    t.partitions.forEach(p => {
-      const key = `${t.name}-${p.partition}`, cy = y + PH / 2;
-      PY[key] = cy;
-      const lead = (reps[key] || {})[p.leader];
-      const off = p.leader < 0;
-      const chips = p.replicas.map((id, i) => {
-        const inIsr = p.isr.includes(id), cx = PX + 40 + i * 26;
-        const r = (reps[key] || {})[id];
-        const tip = `broker-${id}${id === p.leader ? ' (리더)' : ''}${inIsr ? ' · ISR' : ' · ISR 밖'}${r ? ' · LEO ' + r.logEndOffset : ''}`;
-        const got = tr && tr.key === key && (id === p.leader ? tr.has('stored') : tr.has('replicated', 'broker-' + id));
-        return `<g><title>${tip}${got ? ' · 📨 받음' : ''}</title><rect x="${cx}" y="${cy - 10}" width="20" height="20" rx="4" fill="${inIsr ? C(id) : 'none'}"
-          stroke="${C(id)}" stroke-width="2" stroke-dasharray="${inIsr ? '' : '3 2'}" opacity="${(meta.brokers[id] || {}).alive === false ? 0.3 : 1}"/>
-          <text x="${cx + 10}" y="${cy + 4}" text-anchor="middle" font-size="11" font-weight="700" fill="${inIsr ? '#fff' : C(id)}">${id === p.leader ? '★' : id}</text>
-          ${got ? `<circle cx="${cx + 19}" cy="${cy - 10}" r="6" fill="${GOLD}" stroke="var(--card)" stroke-width="1.5"/><text x="${cx + 19}" y="${cy - 7}" text-anchor="middle" font-size="8" font-weight="700" fill="#fff">✓</text>` : ''}</g>`;
-      }).join('');
-      // 복제: 리더 칸 → 팔로워 칸 화살표. 최근에 가져갔고 따라잡았으면 흐르고, 뒤처지면 주황, ISR 밖이면 빨강
-      let repl = '';
-      const li = p.replicas.indexOf(p.leader);
-      if (lead && li >= 0) p.replicas.forEach((id, i) => {
-        if (id === p.leader) return;
-        const f = (lead.followers || {})[id];
-        const x1 = PX + 50 + li * 26, x2 = PX + 50 + i * 26, top = cy - 17;
-        const lag = f ? lead.logEndOffset - f.logEnd : null;
-        const fresh = f && f.lastFetchAgoMs < 1500;
-        const color = !p.isr.includes(id) ? 'var(--bad)' : (!fresh || lag > 20) ? 'var(--warn)' : C(id);
-        repl += `<path d="M${x1},${cy - 10} Q${(x1 + x2) / 2},${top - 4} ${x2},${cy - 10}" fill="none" stroke="${color}" stroke-width="1.6"
-          stroke-dasharray="3 3" ${fresh && lag <= 20 ? anim(30) : ''}><title>broker-${p.leader} → broker-${id} 복제: ${f ? `${lag}건 뒤처짐, ${(f.lastFetchAgoMs / 1000).toFixed(1)}초 전에 가져감` : '아직 안 옴'}</title></path>`;
+    const coords = Object.entries(coordOf).filter(([, id]) => id === b).map(([g]) => g);
+    mid += `<g opacity="${n.reachable && !(r && r.isolated) ? 1 : 0.45}">
+      <rect x="${PX - PW / 2}" y="${y}" width="${PW}" height="${h}" rx="12" fill="var(--card)" stroke="${C(b)}" stroke-width="${b === ctrl ? 3 : 1.6}"/>
+      <text x="${PX - PW / 2 + 14}" y="${y + 21}" font-weight="700" font-size="14">broker-${b}${b === ctrl ? ' 👑 컨트롤러' : ''}</text>
+      <text x="${PX + PW / 2 - 12}" y="${y + 21}" text-anchor="end" font-size="11.5" fill="var(--muted)">${r ? `term ${r.term}` : ''}</text>
+      <text x="${PX - PW / 2 + 14}" y="${y + 39}" font-size="11.5" fill="var(--muted)">${coords.length ? `그룹 코디네이터: ${coords.map(esc).join(', ')} ` : ''}${flags.map(([t, c]) => `<tspan fill="${c}" font-weight="700">${esc(t)} </tspan>`).join('')}</text>`;
+    let ry = y + HEADH;
+    sections.forEach(({t, parts}) => {
+      mid += `<text x="${PX - PW / 2 + 14}" y="${ry + 14}" font-size="11" font-weight="700" fill="var(--muted)">${esc(t.name)}</text>`;
+      ry += TOPH;
+      parts.forEach(p => {
+        const key = `${t.name}-${p.partition}`, cy = ry + RH / 2, col = partColor(t.name, p.partition);
+        ROW[`${key}|${b}`] = cy;
+        const isLeader = p.leader === b, inIsr = p.isr.includes(b);
+        const rep = (reps[key] || {})[b], lead = (reps[key] || {})[p.leader];
+        const traced = tr && tr.key === key;
+        const got = traced && (isLeader ? tr.has('stored') : tr.has('replicated', 'broker-' + b));
+        const x0 = PX - PW / 2 + 10, w = PW - 20;
+        const role = isLeader ? '★ 리더' : inIsr ? '팔로워' : '팔로워 · ISR 밖';
+        const nums = !rep ? '' : isLeader ? `LEO ${rep.logEndOffset} · HW ${rep.highWatermark}`
+          : `LEO ${rep.logEndOffset}${lead && lead.logEndOffset > rep.logEndOffset ? ` · ${lead.logEndOffset - rep.logEndOffset}건 뒤` : ''}`;
+        mid += `<rect x="${x0}" y="${cy - RH / 2 + 3}" width="${w}" height="${RH - 6}" rx="6" fill="${col}" fill-opacity="${isLeader ? 0.16 : 0.04}"
+            stroke="${got ? 'var(--data)' : col}" stroke-width="${got ? 3 : 1.3}" stroke-dasharray="${inIsr ? '' : '4 3'}"/>
+          <rect x="${x0}" y="${cy - RH / 2 + 3}" width="6" height="${RH - 6}" rx="3" fill="${col}"/>
+          <text x="${x0 + 14}" y="${cy + 4}" font-size="12.5" font-weight="700">${key}</text>
+          <text x="${x0 + 74}" y="${cy + 4}" font-size="11.5" fill="${isLeader ? col : 'var(--muted)'}" font-weight="${isLeader ? 700 : 400}">${role}</text>
+          <text x="${x0 + w - 10}" y="${cy + 4}" text-anchor="end" font-size="11" fill="var(--muted)">${nums}</text>
+          ${got ? `<circle cx="${x0 + w - 2}" cy="${cy - RH / 2 + 4}" r="7" fill="var(--data)"/><text x="${x0 + w - 2}" y="${cy - RH / 2 + 7.5}" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">✓</text>` : ''}
+          ${traced && isLeader && tr.has('hw') ? `<text x="${x0 + 132}" y="${cy + 4}" font-size="11" font-weight="700" fill="var(--ctrl)">HW✓</text>` : ''}`;
+        ry += RH;
       });
-      const pending = lead ? lead.logEndOffset - lead.highWatermark : 0;
-      const sub = off ? '<tspan fill="var(--bad)">리더 없음</tspan>'
-        : lead ? `LEO ${lead.logEndOffset} · HW ${lead.highWatermark}${pending > 0 ? ` <tspan fill="var(--warn)">미복제 ${pending}</tspan>` : ''}` : '<tspan fill="var(--muted)">리더 응답 없음</tspan>';
-      const traced = tr && tr.key === key;
-      const ttag = traced ? `<text x="${PX - PW / 2 + 70}" y="${cy - 3}" font-size="11" font-weight="700" fill="${GOLD}">📨 offset ${tr.t.offset}</text>${tr.has('hw') ? `<text x="${PX - PW / 2 + 190}" y="${cy - 3}" font-size="11" font-weight="700" fill="${CTRL}">HW✓</text>` : ''}` : '';
-      parts += `<rect x="${PX - PW / 2}" y="${y}" width="${PW}" height="${PH}" rx="7" fill="var(--card)" stroke="${traced ? GOLD : off ? 'var(--bad)' : 'var(--line)'}" stroke-width="${traced ? 3 : off ? 2 : 1}"/>${ttag}
-        <rect x="${PX - PW / 2}" y="${y}" width="6" height="${PH}" rx="3" fill="${off ? 'var(--bad)' : C(p.leader)}"/>
-        <text x="${PX - PW / 2 + 14}" y="${cy - 3}" font-size="13" font-weight="700">${key}</text>
-        <text x="${PX - PW / 2 + 14}" y="${cy + 12}" font-size="10.5" fill="var(--muted)">${sub}</text>${chips}${repl}`;
-      y += PH + GAP;
     });
-    y += 10;
+    mid += `</g>`;
+    y += h + 22;
+  });
+  const brokersH = y;
+  const rowL = (key, b) => [PX - PW / 2 + 10, ROW[`${key}|${b}`]];
+  const rowR = (key, b) => [PX + PW / 2 - 10, ROW[`${key}|${b}`]];
+  const head = b => BOX[b] ? BOX[b].y + 22 : null;
+
+  // 박동: 컨트롤러 → 다른 브로커 (컨트롤, 왼쪽)
+  Object.keys(BOX).map(Number).forEach(b => {
+    if (b === ctrl || !BOX[ctrl] || !(nodes.find(x => x.id === b) || {}).reachable) return;
+    const x = PX - PW / 2, y1 = head(ctrl), y2 = head(b), bulge = 26 + Math.abs(y2 - y1) / 10;
+    back += `<path d="M${x},${y1} C${x - bulge},${y1} ${x - bulge},${y2} ${x},${y2}" fill="none" stroke="var(--ctrl)" stroke-width="1.6" stroke-dasharray="4 6" opacity=".55" ${anim(3)}>
+      <title>컨트롤러 broker-${ctrl} 의 박동: 메타데이터 v${meta.version} 를 복제한다</title></path>`;
   });
 
-  // 생산자·소비자 노드: 보내는/가져가는 파티션들의 가운데 높이에 둔다
-  const live = traffic.filter(t => t.agoMs < 4000);
-  const clients = (kind) => {
-    const m = {};
-    live.filter(t => t.kind === kind && PY[`${t.topic}-${t.partition}`] !== undefined).forEach(t => {
-      const c = (m[t.client] ||= {name: t.client, edges: {}, rate: 0, acks: {}});
-      const k = `${t.topic}-${t.partition}`;
-      c.edges[k] = (c.edges[k] || 0) + t.rate; c.rate += t.rate;
-      if (t.detail) c.acks[t.topic] = t.detail;
+  // 복제: 리더 줄 → 팔로워 줄 (데이터, 오른쪽)
+  topics.forEach(t => t.partitions.forEach(p => {
+    const key = `${t.name}-${p.partition}`, lead = (reps[key] || {})[p.leader];
+    if (!lead || !ROW[`${key}|${p.leader}`]) return;
+    p.replicas.forEach(f => {
+      if (f === p.leader || !ROW[`${key}|${f}`]) return;
+      const [x, y1] = rowR(key, p.leader), [, y2] = rowR(key, f);
+      const st = (lead.followers || {})[f], lag = st ? lead.logEndOffset - st.logEnd : null;
+      const fresh = st && st.lastFetchAgoMs < 1500;
+      const col = !p.isr.includes(f) ? 'var(--bad)' : (!fresh || lag > 20) ? 'var(--warn)' : partColor(t.name, p.partition);
+      const bulge = 22 + Math.abs(y2 - y1) / 9;
+      const d = `M${x},${y1} C${x + bulge},${y1} ${x + bulge},${y2} ${x},${y2}`;
+      if (tr && tr.key === key) SEG[`replicated|broker-${f}`] = d;
+      const traced = tr && tr.key === key && tr.has('replicated', 'broker-' + f);
+      const trouble = !p.isr.includes(f) || (lag !== null && lag > 20);
+      if (!traced && !trouble) return; // 평소엔 숨긴다 (추적 중인 파티션, 뒤처진 사본만)
+      back += `<path d="${d}" fill="none" stroke="${traced ? 'var(--data)' : col}" stroke-width="${traced ? 3 : 1.5}" stroke-dasharray="4 4" opacity="${traced ? 1 : 0.7}">
+        <title>${key}: broker-${p.leader} → broker-${f} 복제 (팔로워가 가져감) ${st ? `· ${lag}건 뒤, ${(st.lastFetchAgoMs / 1000).toFixed(1)}초 전` : '· 아직 안 옴'}</title></path>`;
     });
-    const list = Object.values(m).map(c => ({...c, y: Object.keys(c.edges).reduce((a, k) => a + PY[k], 0) / Object.keys(c.edges).length}));
-    list.sort((a, b) => a.y - b.y);
-    for (let i = 1; i < list.length; i++) list[i].y = Math.max(list[i].y, list[i - 1].y + 90);
-    return list;
-  };
-  const producers = clients('produce').filter(c => c.name !== '📨 한 건');
-  const CX = {produce: 100, fetch: 1005}, NW = 180, NH = 50;
-
-  // 파티션별 커밋 오프셋 → lag (HW - 1 - 커밋)
-  const lagOfPart = {};
-  up.forEach(n => (n.offsets || []).forEach(o => {
-    const lead = (reps[`${o.topic}-${o.partition}`] || {})[(meta.topics[o.topic]?.partitions[o.partition] || {}).leader];
-    if (lead) lagOfPart[`${o.group}|${o.topic}-${o.partition}`] = Math.max(0, lead.highWatermark - 1 - o.offset);
   }));
-  const fetchRate = {};
-  live.filter(t => t.kind === 'fetch').forEach(t => { fetchRate[`${t.client}|${t.topic}-${t.partition}`] = (fetchRate[`${t.client}|${t.topic}-${t.partition}`] || 0) + t.rate; });
 
-  // 소비자 그룹: 코디네이터 브로커가 가진 그룹 상태에서 그린다 (노는 멤버도 보이게)
-  const STATE = {STABLE: ['안정', 'var(--ok)'], PREPARING_REBALANCE: ['⏳ 재조정 중', 'var(--warn)'], AWAITING_SYNC: ['⏳ 배정 대기', 'var(--warn)'], EMPTY: ['비었음', 'var(--muted)']};
-  const MH = 46, MG = 6, HEAD = 26, GW = 186;
-  const groups = up.flatMap(n => (n.groups || []).map(g => ({...g, coordinator: n.id})))
-    .filter(g => meta.topics[g.topic] && !g.topic.startsWith('__'))
-    .map(g => {
-      const ps = meta.topics[g.topic].partitions.map(p => PY[`${g.topic}-${p.partition}`]);
-      const h = HEAD + g.members.length * (MH + MG) + 4;
-      return {...g, h, y: ps.reduce((a, v) => a + v, 0) / ps.length - h / 2};
-    })
-    .sort((a, b) => a.y - b.y);
-  for (let i = 1; i < groups.length; i++) groups[i].y = Math.max(groups[i].y, groups[i - 1].y + groups[i - 1].h + 14);
-  if (groups.length) groups[0].y = Math.max(groups[0].y, TOP - 10);
-
-  let edges = '', gnodes = '';
-  // 생산자 → 토픽 묶음(허브) → 파티션: 생산자가 어느 토픽에 얼마나 보내는지가 한눈에 보이게
-  const HUBX = PX - PW / 2 - 48;
-  const topicY = {}, partIn = {};
-  topics.forEach(t => { const ys = t.partitions.map(p => PY[`${t.name}-${p.partition}`]); topicY[t.name] = ys.reduce((a, v) => a + v, 0) / ys.length; });
-  producers.forEach(c => {
-    const perTopic = {};
-    Object.entries(c.edges).forEach(([k, r]) => {
-      const t = k.slice(0, k.lastIndexOf('-'));
-      perTopic[t] = (perTopic[t] || 0) + r;
-      partIn[k] = (partIn[k] || 0) + r;
-    });
-    Object.entries(perTopic).forEach(([t, r]) => {
-      edges += `<path d="${curve(CX.produce + NW / 2, c.y, HUBX, topicY[t])}" fill="none" stroke="var(--data)" stroke-opacity="${r ? 0.85 : 0.25}" stroke-width="${width(r)}" stroke-dasharray="8 6" ${anim(r)}><title>${c.name} → ${t}: ${r}건/초 (acks=${c.acks[t] ?? '?'})</title></path>`;
-    });
-  });
-  Object.entries(partIn).forEach(([k, r]) => {
-    const t = k.slice(0, k.lastIndexOf('-'));
-    edges += `<path d="${curve(HUBX, topicY[t], PX - PW / 2, PY[k])}" fill="none" stroke="var(--data)" stroke-opacity="${r ? 0.7 : 0.25}" stroke-width="${width(r)}" stroke-dasharray="8 6" ${anim(r)}><title>→ ${k}: ${r}건/초</title></path>`;
-  });
-  topics.forEach(t => { if (topicY[t.name] !== undefined) edges += `<circle cx="${HUBX}" cy="${topicY[t.name]}" r="5" fill="var(--data)"><title>${esc(t.name)}: hash(key) % ${t.partitions.length} 로 파티션을 고른다</title></circle>`; });
-  const pos = {};
-  producers.forEach(c => pos[c.name] = [CX.produce, c.y]);
-  const commitBy = {};
-  traffic.filter(t => t.kind === 'commit' && t.agoMs < 4000).forEach(t => { commitBy[t.detail] = t; });
-
-  groups.forEach(g => {
-    const x0 = CX.fetch - GW / 2, [label, color] = STATE[g.state] || [g.state, 'var(--muted)'];
-    const lag = Object.entries(lagOfPart).filter(([k]) => k.startsWith(g.group + '|')).reduce((a, [, v]) => a + v, 0);
-    gnodes += `<rect x="${x0}" y="${g.y}" width="${GW}" height="${g.h}" rx="12" fill="none" stroke="${color}" stroke-width="1.5" stroke-dasharray="${g.state === 'STABLE' ? '' : '6 4'}"/>
-      <text x="${x0 + 10}" y="${g.y + 17}" font-size="12" font-weight="700">${esc(g.group)}</text>
-      <text x="${x0 + GW - 10}" y="${g.y + 17}" text-anchor="end" font-size="11.5" fill="${color}" font-weight="600"><title>세대(generation): 재조정이 끝날 때마다 1씩 오른다</title>세대 ${g.generation} · ${label}</text>
-      ${tr && tr.t && tr.t.topic === g.topic && tr.has('committed', 'group ' + g.group) ? `<text x="${x0 + 12 + 7.5 * g.group.length}" y="${g.y + 17}" font-size="12" fill="${CTRL}"><title>📨 이 그룹이 그 메시지까지 오프셋을 커밋함 (컨트롤)</title>📌</text>` : ''}`;
-    // 오프셋 커밋 → 코디네이터 브로커
-    if (BX[g.coordinator]) {
-      const active = commitBy[g.group];
-      edges += `<path d="M${CX.fetch + 40},${g.y} Q${CX.fetch + 40},${BY + 40} ${BX[g.coordinator] + BW / 2},${BY + 20}" fill="none" stroke="var(--commit)" stroke-width="1.6" stroke-dasharray="2 5" stroke-opacity="${active ? 1 : 0.35}" ${active ? anim(active.rate) : ''}><title>그룹 ${g.group} 의 코디네이터 = broker-${g.coordinator} (박동·합류·오프셋 커밋)</title></path>`;
-    }
-    g.members.forEach((m, i) => {
-      const my = g.y + HEAD + i * (MH + MG) + MH / 2;
-      pos[m.clientId] = [CX.fetch, my];
-      const rate = m.assigned.reduce((a, p) => a + (fetchRate[`${m.clientId}|${g.topic}-${p}`] || 0), 0);
-      const mlag = m.assigned.reduce((a, p) => a + (lagOfPart[`${g.group}|${g.topic}-${p}`] || 0), 0);
-      const idle = !m.assigned.length;
-      m.assigned.forEach(p => {
-        const k = `${g.topic}-${p}`, r = fetchRate[`${m.clientId}|${k}`] || 0;
-        if (PY[k] !== undefined) edges += `<path d="${curve(PX + PW / 2, PY[k], CX.fetch - NW / 2, my)}" fill="none" stroke="var(--data)" stroke-opacity="${r ? 0.8 : 0.25}" stroke-width="${width(r)}" stroke-dasharray="8 6" ${anim(r)}><title>${k} → ${m.id}: ${r}건/초</title></path>`;
-      });
-      const tag = m.id.slice(m.id.lastIndexOf('#'));
-      const sub = idle ? (g.state === 'STABLE' ? '놀고 있음 (파티션 < 소비자)' : '배정 기다리는 중')
-        : `파티션 ${m.assigned.join(',')} · ${rate}/초 · lag ${mlag}`;
-      gnodes += `<g opacity="${idle || !m.joined && g.state === 'PREPARING_REBALANCE' ? 0.5 : 1}">
-        <rect x="${CX.fetch - NW / 2}" y="${my - MH / 2}" width="${NW}" height="${MH}" rx="9" fill="var(--card)"
-          stroke="${tr && tr.has('fetched', m.clientId) ? GOLD : 'var(--data)'}" stroke-width="${tr && tr.has('fetched', m.clientId) ? 3.5 : m.id === g.leader ? 2.5 : 1.2}"/>
-        ${tr && tr.has('fetched', m.clientId) ? `<text x="${CX.fetch + NW / 2 - 64}" y="${my - 5}" font-size="13" text-anchor="end"><title>📨 이 소비자가 가져감</title>📥</text>` : ''}
-        <text x="${CX.fetch - NW / 2 + 10}" y="${my - 4}" font-weight="700" font-size="12.5">${esc(tag)}${m.id === g.leader ? ' <tspan font-size="11" fill="var(--accent)">리더</tspan>' : ''}</text>
-        <text x="${CX.fetch - NW / 2 + 10}" y="${my + 13}" font-size="11" fill="var(--muted)">${esc(sub)}</text>
-        <g data-group="${esc(g.group)}" data-member="${esc(m.id)}" data-cmd="crash" style="cursor:pointer"><title>멈춤: 15초 동안 박동도 소비도 멈춘다 (장애 흉내, 그림 4.20)</title>
-          <rect x="${CX.fetch + NW / 2 - 52}" y="${my - 19}" width="22" height="18" rx="4" fill="var(--bg)" stroke="var(--line)"/><text x="${CX.fetch + NW / 2 - 41}" y="${my - 6}" text-anchor="middle" font-size="11">⏸</text></g>
-        <g data-group="${esc(g.group)}" data-member="${esc(m.id)}" data-cmd="leave" style="cursor:pointer"><title>나가기: 그룹에 알리고 나간다, 10초 뒤 다시 합류 (그림 4.19)</title>
-          <rect x="${CX.fetch + NW / 2 - 27}" y="${my - 19}" width="22" height="18" rx="4" fill="var(--bg)" stroke="var(--line)"/><text x="${CX.fetch + NW / 2 - 16}" y="${my - 6}" text-anchor="middle" font-size="11">👋</text></g>
-      </g>`;
-    });
-  });
-
-  // 📨 한 건의 경로. 데이터(금색) = 메시지가 움직인 길, 컨트롤(청록) = 지도·커밋. 좌표는 재생용으로 SEG 에 남긴다
-  let tracePath = '';
-  SEG = {};
-  if (tr && tr.t && PY[tr.key] !== undefined) {
-    const cy = PY[tr.key];
-    let ty = cy;
-    for (const c of producers) if (Math.abs(c.y - ty) < 80) ty = c.y + 90;
-    const line = (show, d, color, title, dash = '10 6', w = 3.2) => show ?
-      `<path d="${d}" fill="none" stroke="${color}" stroke-width="${w}" stroke-dasharray="${dash}" ${anim(40)}><title>${title}</title></path>` : '';
-    const all = tr.all || tr.events;
-    // 🗺 지도: 컨트롤러 → 📨 (메시지가 컨트롤러로 가는 게 아니라, 컨트롤러가 그린 지도를 본다)
-    const map = all.find(e => e.step === 'map');
-    const ctl = map ? Number(map.who.split('-')[1]) : meta.controllerId;
-    if (BX[ctl]) {
-      SEG.map = `M${BX[ctl] - BW / 2},${BY + 10} Q${CX.produce},${BY + 10} ${CX.produce},${ty - 17}`;
-      if (tr.has('map')) tracePath += line(true, SEG.map, CTRL, `🗺 지도(메타데이터)는 컨트롤러 broker-${ctl} 가 그렸다. 메시지는 컨트롤러를 거치지 않는다`, '3 5', 1.8)
-        + `<text x="${CX.produce + 6}" y="${BY + 60}" font-size="11" fill="${CTRL}" font-weight="700">🗺 지도 (컨트롤러 broker-${ctl})</text>`;
-    }
-    // 🧭 생산자 → 토픽 → 파티션 리더
-    const r2 = curve(HUBX, topicY[tr.t.topic], PX - PW / 2, cy);
-    SEG.routed = curve(CX.produce + 40, ty, HUBX, topicY[tr.t.topic]) + ' ' + r2.replace(/^M[^C]*/, '');
-    tracePath += line(tr.has('routed'), SEG.routed, GOLD, `📨 → 토픽 ${tr.t.topic} → hash(key) % 파티션 수 → ${tr.key}`);
-    // 💾 리더 칸, 📋 팔로워 칸, ✅ HW (점 단계)
-    const pm = (meta.topics[tr.t.topic] || {partitions: []}).partitions[tr.t.partition];
-    if (pm) {
-      const cx = i => PX + 50 + i * 26, li = pm.replicas.indexOf(pm.leader);
-      SEG.stored = [cx(li), cy];
-      pm.replicas.forEach((id, i) => { if (id !== pm.leader) SEG['replicated|broker-' + id] = `M${cx(li)},${cy - 10} Q${(cx(li) + cx(i)) / 2},${cy - 30} ${cx(i)},${cy - 10}`; });
-    }
-    SEG.hw = [PX - PW / 2 + 40, cy + 12];
-    // 📥 파티션 → 가져간 소비자, 📌 소비자 → 코디네이터
-    const fetcher = all.find(e => e.step === 'fetched');
-    if (fetcher && pos[fetcher.who]) {
-      const [mx, my] = pos[fetcher.who];
-      SEG['fetched|' + fetcher.who] = curve(PX + PW / 2, cy, mx - NW / 2, my);
-      tracePath += line(tr.has('fetched'), SEG['fetched|' + fetcher.who], GOLD, `${tr.key} → ${fetcher.who} (HW 를 넘은 뒤 가져감)`);
-      const com = all.find(e => e.step === 'committed');
-      if (com && BX[com.broker]) {
-        SEG['committed|' + com.who] = `M${mx + NW / 2 - 6},${my - MH / 2} Q${mx + NW / 2 + 30},${BY + 60} ${BX[com.broker] + BW / 2},${BY + 25}`;
-        tracePath += line(tr.has('committed'), SEG['committed|' + com.who], CTRL, `오프셋 커밋 → 그룹 코디네이터 broker-${com.broker}`, '3 5', 2.4);
+  // ---- 왼쪽: 생산자 (🧺 버퍼 → 🧭 라우팅)
+  const QX = 160, QW = 290, SLOT = 15;
+  let qy = 30;
+  (s.producers || []).forEach(pr => {
+    const tm = meta.topics[pr.topic];
+    const nparts = tm ? tm.partitions.length : 0, batch = pr.batchSize || 5;
+    const bufH = 40 + nparts * 22, routH = 48, h = 32 + bufH + 8 + routH + 10;
+    const x0 = QX - QW / 2, bufY = qy + 32, routY = bufY + bufH + 8;
+    const mineTopic = tr && tr.t && tr.t.topic === pr.topic;
+    front += `<g opacity="${pr.reachable && pr.ready ? 1 : 0.5}">
+      <rect x="${x0}" y="${qy}" width="${QW}" height="${h}" rx="12" fill="var(--card)" stroke="var(--data)" stroke-width="1.8"/>
+      <text x="${x0 + 12}" y="${qy + 21}" font-weight="700" font-size="14">${esc(pr.name)}</text>
+      <text x="${x0 + QW - 12}" y="${qy + 21}" text-anchor="end" font-size="11.5" fill="var(--muted)">→ ${esc(pr.topic)} · acks=${esc(pr.acks)}</text>
+      <rect x="${x0 + 10}" y="${bufY}" width="${QW - 20}" height="${bufH}" rx="8" fill="var(--bg)" stroke="var(--line)"/>
+      <text x="${x0 + 20}" y="${bufY + 17}" font-size="12" font-weight="700">🧺 버퍼</text>
+      <text x="${x0 + 20}" y="${bufY + 32}" font-size="10.5" fill="var(--muted)">hash(key) % ${nparts} → 파티션별 묶음 · ${batch}건 차거나 ${(pr.lingerMs || 0) / 1000}초 뒤 보냄</text>`;
+    const buf = {};
+    (pr.buffer || []).forEach(bb => { buf[bb.partition] = bb; });
+    for (let p = 0; p < nparts; p++) {
+      const ry = bufY + 39 + p * 22, bb = buf[p], keys = bb ? bb.keys : [];
+      front += `<text x="${x0 + 22}" y="${ry + 12}" font-size="11" fill="${partColor(pr.topic, p)}" font-weight="700">p${p}</text>`;
+      for (let i = 0; i < batch; i++) {
+        const k = keys[i], cx = x0 + 46 + i * (SLOT + 4);
+        const mine = k && k === currentTrace;
+        front += `<rect x="${cx}" y="${ry}" width="${SLOT}" height="${SLOT}" rx="3" fill="${k ? (mine ? 'var(--data)' : partColor(pr.topic, p)) : 'none'}"
+          stroke="${mine ? 'var(--data)' : partColor(pr.topic, p)}" stroke-width="${mine ? 2.5 : 1.2}">${k ? `<title>${esc(k)}</title>` : ''}</rect>`;
+        if (mine) SEG.buffered = [cx + SLOT / 2, ry + SLOT / 2];
+      }
+      if (bb) {
+        const left = Math.max(0, ((pr.lingerMs || 0) - bb.ageMs) / 1000);
+        front += `<text x="${x0 + 46 + batch * (SLOT + 4) + 6}" y="${ry + 12}" font-size="11" fill="var(--muted)">${keys.length}/${batch} · ${left.toFixed(1)}초 뒤 보냄</text>`;
       }
     }
-    tracePath += `<g><rect x="${CX.produce - 40}" y="${ty - 17}" width="80" height="34" rx="9" fill="var(--card)" stroke="${GOLD}" stroke-width="2.5"/>
-      <text x="${CX.produce}" y="${ty + 5}" text-anchor="middle" font-size="13" font-weight="700">📨 한 건</text><title>${esc(tr.id)}</title></g>`;
-  }
-
-  // 라우팅(지도 받기): 클라이언트 → 브로커
-  traffic.filter(t => t.kind === 'metadata' && t.agoMs < 8000 && pos[t.client] && BX[t.broker]).forEach(t => {
-    const [x, cy] = pos[t.client];
-    edges += `<path d="M${x},${cy - NH / 2} Q${x},${BY} ${BX[t.broker] + (x < 550 ? -BW / 2 : BW / 2)},${BY + 10}" fill="none" stroke="var(--route)" stroke-width="2" stroke-dasharray="2 5" ${anim(8)}><title>${t.client} 가 broker-${t.broker} 에게 지도(${t.detail}) 받음 ${Math.round(t.agoMs / 1000)}초 전</title></path>`;
+    if (!SEG.buffered && mineTopic) SEG.buffered = [x0 + 46 + 2 * (SLOT + 4), bufY + 39 + tr.t.partition * 22 + SLOT / 2];
+    const leaders = pr.leaders || {};
+    front += `<rect x="${x0 + 10}" y="${routY}" width="${QW - 20}" height="${routH}" rx="8" fill="var(--bg)" stroke="var(--line)"/>
+      <text x="${x0 + 20}" y="${routY + 17}" font-size="12" font-weight="700">🧭 라우팅</text>
+      <text x="${x0 + QW - 20}" y="${routY + 17}" text-anchor="end" font-size="10.5" fill="var(--ctrl)">지도 v${pr.metadataVersion ?? '?'} (컨트롤러 broker-${pr.controllerId ?? '?'} 가 그림)</text>
+      <text x="${x0 + 20}" y="${routY + 36}" font-size="11" fill="var(--muted)">${Object.entries(leaders).map(([p, l]) => `p${p} → broker-${l}`).join(' · ')}</text></g>`;
+    // 라우팅 → 각 파티션 리더 (데이터)
+    const routeX = x0 + QW - 10, routeY = routY + routH / 2;
+    if (tm) tm.partitions.forEach(p => {
+      const key = `${pr.topic}-${p.partition}`;
+      if (!ROW[`${key}|${p.leader}`]) return;
+      const rate = live.filter(t => t.kind === 'produce' && t.client === pr.name && t.topic === pr.topic && t.partition === p.partition).reduce((a, t) => a + t.rate, 0);
+      const d = curve(routeX, routeY, ...rowL(key, p.leader));
+      if (tr && tr.key === key) SEG.dispatched = d;
+      const traced = tr && tr.key === key && tr.has('dispatched');
+      back += `<path d="${d}" fill="none" stroke="${traced ? 'var(--data)' : partColor(pr.topic, p.partition)}" stroke-width="${traced ? 3.2 : width(rate)}"
+        stroke-dasharray="8 6" opacity="${traced ? 1 : rate ? 0.85 : 0.3}" ${anim(rate)}><title>${pr.name} → ${key} 의 리더 broker-${p.leader}</title></path>`;
+    });
+    // 지도: 컨트롤러 → 라우팅 (컨트롤)
+    if (BOX[ctrl]) {
+      const d = `M${PX - PW / 2},${head(ctrl) - 8} C${QX + 60},${head(ctrl) - 8} ${x0 + QW - 40},${routY - 30} ${x0 + QW - 40},${routY}`;
+      if (mineTopic) SEG.map = d;
+      const traced = mineTopic && tr.has('map');
+      back += `<path d="${d}" fill="none" stroke="var(--ctrl)" stroke-width="${traced ? 2.4 : 1.2}" stroke-dasharray="3 5" opacity="${traced ? 1 : 0.35}">
+        <title>지도(메타데이터): 컨트롤러 broker-${ctrl} 가 그리고 복제한다. 생산자는 아무 브로커에서 받아 캐시한다</title></path>`;
+    }
+    qy += h + 24;
   });
 
-  // 생산자 노드: 이름, 토픽별 acks, 합계 속도
-  const clientNode = (c, x) => {
-    const acks = Object.entries(c.acks).sort().map(([t, a]) => `${esc(t)} <tspan font-weight="700">${a === 'all' ? 'all' : a}</tspan>`).join(' · ');
-    return `<rect x="${x - NW / 2}" y="${c.y - 32}" width="${NW}" height="64" rx="10" fill="var(--card)" stroke="var(--data)" stroke-width="1.5"/>
-      <text x="${x}" y="${c.y - 12}" text-anchor="middle" font-weight="700" font-size="13">${esc(c.name)}</text>
-      <text x="${x}" y="${c.y + 5}" text-anchor="middle" font-size="11" fill="var(--muted)"><title>토픽별 acks</title>${acks}</text>
-      <text x="${x}" y="${c.y + 21}" text-anchor="middle" font-size="11.5" fill="var(--muted)">${c.rate}/초</text>`;
-  };
-  const cl = producers.map(c => clientNode(c, CX.produce)).join('') + gnodes;
-  const heads = `<text x="${CX.produce}" y="${TOP - 18}" text-anchor="middle" font-size="12" fill="var(--muted)">생산자</text>
-    <text x="${PX}" y="${TOP - 18}" text-anchor="middle" font-size="12" fill="var(--muted)">파티션 (왼쪽 띠 = 리더 브로커)</text>
-    <text x="${CX.fetch}" y="${TOP - 18}" text-anchor="middle" font-size="12" fill="var(--muted)">소비자 그룹</text>`;
-  const fullH = Math.max(y + 10, 330, ...producers.map(c => c.y + NH), ...groups.map(g => g.y + g.h + 10));
+  // ---- 오른쪽: 소비자 그룹
+  const CXc = 1060, NW = 172, MH = 44, MG = 6, GHEAD = 26, GW = 188;
+  const fetchRate = {};
+  live.filter(t => t.kind === 'fetch').forEach(t => { fetchRate[`${t.client}|${t.topic}-${t.partition}`] = (fetchRate[`${t.client}|${t.topic}-${t.partition}`] || 0) + t.rate; });
+  const lagOf = {};
+  up.forEach(n => (n.offsets || []).forEach(o => {
+    const l = (reps[`${o.topic}-${o.partition}`] || {})[(meta.topics[o.topic]?.partitions[o.partition] || {}).leader];
+    if (l) lagOf[`${o.group}|${o.topic}-${o.partition}`] = Math.max(0, l.highWatermark - 1 - o.offset);
+  }));
+  const STATE = {STABLE: ['안정', 'var(--ok)'], PREPARING_REBALANCE: ['⏳ 재조정 중', 'var(--warn)'], AWAITING_SYNC: ['⏳ 배정 대기', 'var(--warn)'], EMPTY: ['비었음', 'var(--muted)']};
+  let gy = 30;
+  up.flatMap(n => (n.groups || []).map(g => ({...g, coordinator: n.id})))
+    .filter(g => topics.some(t => t.name === g.topic)).sort((a, b) => a.topic.localeCompare(b.topic))
+    .forEach(g => {
+      const x0 = CXc - GW / 2, [label, color] = STATE[g.state] || [g.state, 'var(--muted)'];
+      const gh = GHEAD + g.members.length * (MH + MG) + 4;
+      front += `<rect x="${x0}" y="${gy}" width="${GW}" height="${gh}" rx="12" fill="none" stroke="${color}" stroke-width="1.5" stroke-dasharray="${g.state === 'STABLE' ? '' : '6 4'}"/>
+        <text x="${x0 + 10}" y="${gy + 17}" font-size="12" font-weight="700">${esc(g.group)} <tspan font-weight="400" fill="var(--muted)">← ${esc(g.topic)}</tspan></text>
+        <text x="${x0 + GW - 10}" y="${gy + 17}" text-anchor="end" font-size="11" fill="${color}" font-weight="600"><title>세대(generation): 재조정이 끝날 때마다 1씩 오른다</title>세대 ${g.generation} · ${label}</text>`;
+      // 그룹 → 코디네이터 브로커 (컨트롤)
+      if (BOX[g.coordinator]) {
+        const d = `M${x0},${gy + 12} C${x0 - 40},${gy + 12} ${PX + PW / 2 + 60},${head(g.coordinator)} ${PX + PW / 2},${head(g.coordinator)}`;
+        back += `<path d="${d}" fill="none" stroke="var(--ctrl)" stroke-width="1.3" stroke-dasharray="2 5" opacity=".45"><title>그룹 ${g.group} 의 코디네이터 = broker-${g.coordinator} (박동·합류·오프셋 커밋)</title></path>`;
+      }
+      g.members.forEach((m, i) => {
+        const my = gy + GHEAD + i * (MH + MG) + MH / 2, mx = CXc;
+        const mlag = m.assigned.reduce((a, p) => a + (lagOf[`${g.group}|${g.topic}-${p}`] || 0), 0);
+        const idle = !m.assigned.length, fetched = tr && tr.has('fetched', m.clientId);
+        m.assigned.forEach(p => {
+          const key = `${g.topic}-${p}`, pm = meta.topics[g.topic].partitions[p];
+          if (!pm || !ROW[`${key}|${pm.leader}`]) return;
+          const r = fetchRate[`${m.clientId}|${key}`] || 0;
+          const d = curve(PX + PW / 2, ROW[`${key}|${pm.leader}`], mx - NW / 2, my);
+          if (tr && tr.key === key) SEG[`fetched|${m.clientId}`] = d;
+          const traced = tr && tr.key === key && fetched;
+          back += `<path d="${d}" fill="none" stroke="${traced ? 'var(--data)' : partColor(g.topic, p)}" stroke-width="${traced ? 3.2 : width(r)}" stroke-dasharray="8 6"
+            opacity="${traced ? 1 : r ? 0.85 : 0.3}" ${anim(r)}><title>${key} 의 리더 broker-${pm.leader} → ${m.id}</title></path>`;
+        });
+        if (BOX[g.coordinator] && tr && tr.key && tr.key.startsWith(g.topic + '-') && m.assigned.includes(tr.t.partition)) {
+          const d = `M${mx + NW / 2 - 8},${my - MH / 2} C${mx + NW / 2 + 20},${my - 60} ${PX + PW / 2 + 90},${head(g.coordinator) + 6} ${PX + PW / 2},${head(g.coordinator) + 6}`;
+          SEG[`committed|group ${g.group}`] = d;
+          if (tr.has('committed', 'group ' + g.group)) tracePath += `<path d="${d}" fill="none" stroke="var(--ctrl)" stroke-width="2.4" stroke-dasharray="3 5"><title>오프셋 커밋 → 코디네이터 broker-${g.coordinator}</title></path>`;
+        }
+        const tag = m.id.slice(m.id.lastIndexOf('#'));
+        const sub = idle ? (g.state === 'STABLE' ? '놀고 있음 (파티션 < 소비자)' : '배정 기다리는 중') : `파티션 ${m.assigned.join(',')} · lag ${mlag}`;
+        front += `<g opacity="${idle ? 0.5 : 1}">
+          <rect x="${mx - NW / 2}" y="${my - MH / 2}" width="${NW}" height="${MH}" rx="9" fill="var(--card)"
+            stroke="${fetched ? 'var(--data)' : 'var(--line)'}" stroke-width="${fetched ? 3.5 : m.id === g.leader ? 2.2 : 1.2}"/>
+          <text x="${mx - NW / 2 + 10}" y="${my - 4}" font-weight="700" font-size="12.5">${esc(tag)}${m.id === g.leader ? ' <tspan font-size="11" fill="var(--accent)">리더</tspan>' : ''}${fetched ? ' 📥' : ''}</text>
+          <text x="${mx - NW / 2 + 10}" y="${my + 13}" font-size="11" fill="var(--muted)">${esc(sub)}</text>
+          <g data-group="${esc(g.group)}" data-member="${esc(m.id)}" data-cmd="crash" style="cursor:pointer"><title>멈춤: 15초 동안 박동도 소비도 멈춘다 (장애 흉내)</title>
+            <rect x="${mx + NW / 2 - 52}" y="${my - 19}" width="22" height="18" rx="4" fill="var(--bg)" stroke="var(--line)"/><text x="${mx + NW / 2 - 41}" y="${my - 6}" text-anchor="middle" font-size="11">⏸</text></g>
+          <g data-group="${esc(g.group)}" data-member="${esc(m.id)}" data-cmd="leave" style="cursor:pointer"><title>나가기: 그룹에 알리고 나간다, 10초 뒤 다시 합류</title>
+            <rect x="${mx + NW / 2 - 27}" y="${my - 19}" width="22" height="18" rx="4" fill="var(--bg)" stroke="var(--line)"/><text x="${mx + NW / 2 - 16}" y="${my - 6}" text-anchor="middle" font-size="11">👋</text></g>
+        </g>`;
+      });
+      gy += gh + 16;
+    });
+
+  // ---- 재생용 점 위치 (리더 줄)
+  if (tr && tr.t) {
+    const pm = (meta.topics[tr.t.topic] || {partitions: []}).partitions[tr.t.partition];
+    if (pm && ROW[`${tr.key}|${pm.leader}`]) {
+      SEG.stored = [PX + PW / 2 - 30, ROW[`${tr.key}|${pm.leader}`]];
+      SEG.hw = [PX - PW / 2 + 152, ROW[`${tr.key}|${pm.leader}`]];
+    }
+  }
+
+  const heads = `<text x="${QX}" y="18" text-anchor="middle" font-size="12" fill="var(--muted)">생산자 (클라이언트 라이브러리)</text>
+    <text x="${PX}" y="18" text-anchor="middle" font-size="12" fill="var(--muted)">브로커 (파티션 사본)</text>
+    <text x="${CXc}" y="18" text-anchor="middle" font-size="12" fill="var(--muted)">소비자 그룹</text>`;
+  const fullH = Math.max(brokersH, qy, gy) + 10;
   const el = document.getElementById('flow');
-  el.setAttribute('viewBox', `0 0 1100 ${fullH}`);
-  document.getElementById('overlay').setAttribute('viewBox', `0 0 1100 ${fullH}`);
-  el.innerHTML = edges + svg + parts + cl + heads + tracePath;
+  el.setAttribute('viewBox', `0 0 1160 ${fullH}`);
+  document.getElementById('overlay').setAttribute('viewBox', `0 0 1160 ${fullH}`);
+  el.innerHTML = back + mid + front + tracePath + heads;
+}
+
+// ------------------------------------------------------------------ 표·타임라인
+function traceView(s, tr) {
+  const body = document.getElementById('trace');
+  if (!tr) return;
+  document.getElementById('trTitle').textContent = tr.t ? `${tr.id} · ${tr.t.topic}-${tr.t.partition} offset ${tr.t.offset}` : tr.id;
+  const all = tr.all, t0 = all.length ? all[0].at : 0;
+  let rows = all.map((e, i) => {
+    const k = STEP_KIND[e.step] || 'ctrl';
+    const cls = !replay.on ? '' : i >= replay.k ? 'future' : i === replay.k - 1 ? 'cur' : '';
+    const where = e.broker > 0 ? `<span class="dot" style="background:${C(e.broker)}" title="broker-${e.broker} 에서 기록"></span>` : `<span class="dot" style="background:var(--data)" title="생산자에서 기록"></span>`;
+    return `<tr class="${cls}"><td>+${e.at - t0}ms</td><td>${kindTag(k)}${STEP_ICON[e.step] || '•'} ${where} ${esc(e.text)}</td></tr>`;
+  }).join('');
+  if (!replay.on && !tr.done) {
+    const last = all.at(-1);
+    rows += `<tr class="wait"><td>…</td><td>${last && last.step === 'buffered' ? '생산자 버퍼에서 기다리는 중 (묶음 5건 또는 10초)' : '다음 단계를 기다리는 중'}</td></tr>`;
+  }
+  body.innerHTML = rows || '<tr class="wait"><td></td><td>기록을 모으는 중…</td></tr>';
 }
 
 function tables(s) {
@@ -622,7 +554,7 @@ async function refresh() {
   catch (e) { document.getElementById('updated').textContent = '연결 안 됨 — 8081~8083 중 다른 포트로'; return; }
   lastState = s;
   tools(s.nodes);
-  flowbar(s.metadata);
+  sendbar(s);
   draw(s);
   tables(s);
   traceView(s, traceOf(s));
