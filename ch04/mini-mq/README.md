@@ -19,7 +19,7 @@
 ```bash
 ./run.sh                      # jar 빌드 + docker compose up -d
 open http://localhost:8081    # 대시보드 (8082, 8083 도 같은 화면)
-docker compose logs -f producer-logs producer-orders consumer-logs consumer-orders
+docker compose logs -f producer-web producer-batch consumer-logs consumer-orders consumer-metrics
 docker compose down -v        # 끝. -v 는 브로커 데이터까지 지운다
 RAFT_RPC_LOG=DEBUG ./run.sh   # Raft 박동 송수신까지 로그로 보기
 ```
@@ -29,7 +29,7 @@ RAFT_RPC_LOG=DEBUG ./run.sh   # Raft 박동 송수신까지 로그로 보기
 http://localhost:8081 (8082, 8083 도 같은 화면). 위에서 아래로:
 
 - **컨트롤 플레인**: 브로커 3대. 👑 = 컨트롤러(Raft 리더), 금색 점선 = 박동 + 메타데이터 복제
-- **데이터 플레인**: 생산자 → 파티션 → 소비자. 선 굵기 = 초당 건수
+- **데이터 플레인**: 생산자 → 토픽(● 허브) → 파티션 → 소비자 그룹. 선 굵기 = 초당 건수. 생산자 칸에 토픽별 acks
   - 파티션 왼쪽 띠 색 = 리더 브로커, 사본 칸 = ★ 리더 / 꽉 참 ISR / 점선 ISR 밖, 칸 위 화살표 = 복제(주황 뒤처짐, 빨강 ISR 밖)
 - **보라 점선** = 클라이언트가 지도(메타데이터)를 받아 감 = 라우팅. 평소엔 없고 장애 직후에 나타난다
 - **소비자 그룹 상자**: 세대·상태(안정 / ⏳ 재조정 중 / ⏳ 배정 대기), 멤버마다 맡은 파티션·속도·lag. 굵은 테두리 = 리더 소비자, 흐린 칸 = 노는 멤버
@@ -37,13 +37,24 @@ http://localhost:8081 (8082, 8083 도 같은 화면). 위에서 아래로:
 - 맨 위 버튼: **고립** / **느린 복제**(끔 → 2초 → 6초) / **강제 종료**(15초 뒤 다시 뜸)
 - 멤버 칸의 **⏸** = 15초 멈춤(박동도 끊김, 장애 흉내) / **👋** = 그룹에서 나갔다가 10초 뒤 다시 합류
 
-## 4단계: 소비자 그룹 재조정 (그림 4.15~4.20)
+## 지금 데모 구성 (docker-compose.yml)
 
 ```
-consumer-logs   × 3  ─ 그룹 search  ─ logs   6 파티션 → 2개씩
-consumer-orders × 4  ─ 그룹 payment ─ orders 3 파티션 → 1명은 논다 (그림 4.7)
-늘리기: docker compose up -d --no-recreate --scale consumer-logs=4 consumer-logs
+producer-web   ─┬─▶ logs    6 파티션, ACK=1,   최소 ISR 1  ─▶ 그룹 search  × 3
+                ├─▶ orders  3 파티션, ACK=all, 최소 ISR 2  ─▶ 그룹 payment × 4 (1명 놀기)
+                └─▶ metrics 3 파티션, ACK=0                 ─▶ 그룹 monitor × 2
+producer-batch ─┬─▶ logs
+                └─▶ orders
 ```
+
+- 생산자는 `DEMO_TOPICS="토픽:파티션수:acks:최소ISR:초당건수,..."` 로 여러 토픽에 보낸다. 토픽마다 생산자 객체를 따로 둔다(acks 가 다르니까)
+- 키 = `생산자이름-서버번호`(web-03, batch-07). 여러 생산자가 같은 토픽에 써도 순서 검사가 섞이지 않게
+- 소비자는 키별 seq 로 `gap`(ACK 받고 사라짐)·`dup`(다시 읽음)을 센다. 생산자는 ACK=0 빼고 끝없이 재시도하므로 gap 은 진짜 유실만 뜻한다
+- ACK=0 도 응답이 올 때까지는 다음 묶음을 보내지 않는다(결과는 안 본다). 그래야 파티션 안 순서가 뒤바뀌지 않는다
+
+## 4단계: 소비자 그룹 재조정 (그림 4.15~4.20)
+
+소비자 늘리기: `docker compose up -d --no-recreate --scale consumer-logs=4 consumer-logs`
 
 | 교재 | 여기서 | 코드 |
 |---|---|---|
@@ -80,11 +91,6 @@ consumer-orders × 4  ─ 그룹 payment ─ orders 3 파티션 → 1명은 논�
 - 처리가 오래 걸려도 박동은 따로 가므로 "멈춘 처리"를 잡지 못한다 (카프카 `max.poll.interval.ms`)
 
 ## 3단계: 복제 (그림 4.23~4.28)
-
-```
-producer-logs   (ACK=1)   ─▶  logs   6 파티션 × 사본 3, 최소 ISR 1  ─▶ consumer-search
-producer-orders (ACK=all) ─▶  orders 3 파티션 × 사본 3, 최소 ISR 2  ─▶ consumer-payment
-```
 
 | 개념 | 여기서 | 코드 |
 |---|---|---|
@@ -216,7 +222,8 @@ producer ──(서버 ID 키, 버퍼에 모아 일괄 전송)──▶ 파티�
 | `MINIMQ_BROKER_DEAD_MS` | 3000 | 이 시간 응답이 없으면 컨트롤러가 죽음으로 표시 |
 | `MINIMQ_REPLICA_LAG_TIME_MS` / `LAG_MAX_MESSAGES` | 4000 / 1000 | 이 시간 안 오거나 이만큼 뒤처지면 ISR 에서 뺀다 |
 | `MINIMQ_ACK_TIMEOUT_MS` | 5000 | ACK=all 이 ISR 전원을 기다리는 최대 시간 |
-| `DEMO_ACKS` / `DEMO_MIN_INSYNC_REPLICAS` | 1 / 1 | 생산자 acks(0, 1, all) / 토픽을 만들 때 최소 ISR |
+| `DEMO_NAME` / `DEMO_TOPICS` | server / (비움) | 생산자 이름(키 앞에 붙음) / 여러 토픽: `토픽:파티션수:acks:최소ISR:초당건수,...` |
+| `DEMO_ACKS` / `DEMO_MIN_INSYNC_REPLICAS` | 1 / 1 | `DEMO_TOPICS` 를 안 쓸 때: 생산자 acks(0, 1, all) / 최소 ISR |
 | `MINIMQ_SESSION_TIMEOUT_MS` / `REBALANCE_TIMEOUT_MS` | 6000 / 4000 | 소비자 박동이 끊겼다고 볼 시간 / 재조정 때 다시 합류를 기다리는 시간 |
 | `DEMO_ASSIGNOR` | range | 리더 소비자의 배치 방식: range \| roundrobin |
 | `DEMO_RATE_PER_SEC` / `DEMO_SERVERS` | 200 / 20 | 생산 속도 / 키 개수 |

@@ -6,4 +6,4 @@ cd "$(dirname "$0")"
 docker compose up --build -d "$@"
 echo
 echo "대시보드: http://localhost:8081  (8082, 8083 도 같은 화면)"
-echo "로그 보기: docker compose logs -f producer-logs producer-orders consumer-logs consumer-orders"
+echo "로그 보기: docker compose logs -f producer-web producer-batch consumer-logs consumer-orders consumer-metrics"

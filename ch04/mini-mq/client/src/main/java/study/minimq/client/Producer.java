@@ -108,10 +108,12 @@ public final class Producer implements AutoCloseable {
     private void sendWithRetry(Batch b) {
         ProduceRequest req = new ProduceRequest(b.tp.topic(), b.tp.partition(), cfg.acks(), b.records);
         if (cfg.acks() == 0) {
+            // ACK=0: 결과를 보지 않고 재시도도 없다. 다만 응답이 올 때까지는 다음 묶음을 보내지 않아
+            // 같은 파티션 안 순서는 지킨다 (응답을 안 기다리고 마구 보내면 도착 순서가 뒤바뀔 수 있다)
             try {
-                view.leader(b.tp.topic(), b.tp.partition()).postAndForget("/produce", req);
+                view.leader(b.tp.topic(), b.tp.partition()).post("/produce", req, Void.class);
             } catch (IOException ignored) {
-                // 재시도 없음. 손실을 감수한다
+                view.invalidate(); // 손실을 감수한다
             }
             sentBatches.incrementAndGet();
             sentRecords.addAndGet(b.records.size());

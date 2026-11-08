@@ -9,6 +9,9 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * 환경 변수로 바꾼다. 예) DEMO_ROLE=consumer DEMO_GROUP=search DEMO_COMMIT_MODE=before
  *
  * @param role        producer | consumer
+ * @param name        생산자 이름. 키 앞에 붙는다 (web-03). 여러 생산자가 같은 토픽에 써도 키가 겹치지 않게
+ * @param topics      생산자가 여러 토픽에 보낼 때 "토픽:파티션수:acks:최소ISR:초당건수" 를 쉼표로.
+ *                    예) logs:6:1:1:150,orders:3:all:2:60. 비우면 topic·acks·ratePerSec 하나만
  * @param acks        0 | 1 | all
  * @param minInsyncReplicas 토픽을 만들 때 최소 ISR (ACK=all 이 이보다 ISR 이 적으면 거부된다)
  * @param servers     로그를 보내는 가상 서버 수 (키 = server-NN)
@@ -23,6 +26,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 @ConfigurationProperties(prefix = "demo")
 public record DemoProperties(
         @DefaultValue("producer") String role,
+        @DefaultValue("server") String name,
+        @DefaultValue("") String topics,
         @DefaultValue("http://localhost:8080") String bootstrap,
         @DefaultValue("logs") String topic,
         @DefaultValue("6") int topicPartitions,
