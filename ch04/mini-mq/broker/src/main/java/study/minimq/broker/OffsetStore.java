@@ -26,10 +26,14 @@ import study.minimq.common.Topics;
 @Component
 public class OffsetStore {
     private final ReplicaManager replicas;
+    private final Traces traces;
+    private final BrokerProperties props;
     private final Map<Integer, Map<String, Long>> cache = new ConcurrentHashMap<>(); // 오프셋 파티션 → (키 → 오프셋)
 
-    public OffsetStore(ReplicaManager replicas) {
+    public OffsetStore(ReplicaManager replicas, Traces traces, BrokerProperties props) {
         this.replicas = replicas;
+        this.traces = traces;
+        this.props = props;
         replicas.onBecomeLeader((topic, partition) -> {
             if (topic.equals(Topics.CONSUMER_OFFSETS)) rebuild(partition);
         });
@@ -56,6 +60,10 @@ public class OffsetStore {
         return replicas.produce(Topics.CONSUMER_OFFSETS, p, -1, records).thenAccept(range -> {
             Map<String, Long> m = cache.computeIfAbsent(p, x -> new ConcurrentHashMap<>());
             records.forEach(r -> m.put(r.key(), Long.parseLong(r.value())));
+            for (OffsetCommit c : commits) {
+                traces.hit(c.topic(), c.partition(), 0, c.offset() + 1, "committed", "group " + c.group(),
+                        "그룹 " + c.group() + " 이 offset " + c.offset() + " 까지 커밋 → {offset} 처리 끝 (코디네이터 broker-" + props.brokerId() + ")");
+            }
         });
     }
 

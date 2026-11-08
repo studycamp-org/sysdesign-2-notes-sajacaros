@@ -29,10 +29,12 @@ public class BrokerApi {
     private final RaftNode raft;
     private final Traffic traffic;
     private final GroupCoordinator groups;
+    private final Traces traces;
     private static final String CLIENT = "X-MiniMq-Client";
 
     public BrokerApi(ReplicaManager replicas, OffsetStore offsets, Controller controller, RaftNode raft, Traffic traffic,
-                     GroupCoordinator groups) {
+                     GroupCoordinator groups, Traces traces) {
+        this.traces = traces;
         this.traffic = traffic;
         this.groups = groups;
         this.replicas = replicas;
@@ -84,6 +86,11 @@ public class BrokerApi {
                                                  @RequestHeader(value = CLIENT, required = false) String client) {
         return replicas.consumerFetch(topic, partition, offset, max, waitMs).thenApply(r -> {
             traffic.record(client, "fetch", topic, partition, r.messages().size(), null);
+            if (!r.messages().isEmpty()) {
+                long first = r.messages().get(0).offset(), last = r.messages().get(r.messages().size() - 1).offset();
+                traces.hit(topic, partition, first, last + 1, "fetched", String.valueOf(client),
+                        client + " 가 offset {offset} 을 가져감 (HW " + r.highWatermark() + " 앞까지만 받음)");
+            }
             return r;
         });
     }

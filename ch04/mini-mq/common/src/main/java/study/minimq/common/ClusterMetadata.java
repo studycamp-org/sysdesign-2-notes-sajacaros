@@ -12,6 +12,7 @@ import java.util.TreeMap;
  * 투표할 때 (term, version) 을 비교해 더 뒤처진 후보에게는 표를 주지 않는다.
  *
  * @param controllerEpoch 지금 컨트롤러가 당선된 term. 브로커는 이보다 낮은 epoch 의 명령을 거부한다(펜싱)
+ * @param settings        클러스터 설정 (예: 데모 자동 생산 켜고 끄기). 메타데이터와 함께 과반에 복제된다
  */
 public record ClusterMetadata(
         long version,
@@ -19,37 +20,52 @@ public record ClusterMetadata(
         int controllerId,
         long controllerEpoch,
         Map<Integer, BrokerInfo> brokers,
-        Map<String, TopicMetadata> topics) {
+        Map<String, TopicMetadata> topics,
+        Map<String, String> settings) {
+
+    public ClusterMetadata {
+        if (settings == null) settings = Map.of(); // 예전 raft.json 에는 없다
+    }
 
     public static ClusterMetadata initial(Map<Integer, String> members) {
         Map<Integer, BrokerInfo> brokers = new TreeMap<>();
         members.forEach((id, url) -> brokers.put(id, new BrokerInfo(id, url, true)));
-        return new ClusterMetadata(0, 0, -1, 0, brokers, new TreeMap<>());
+        return new ClusterMetadata(0, 0, -1, 0, brokers, new TreeMap<>(), Map.of());
     }
 
     public ClusterMetadata withVersion(long newVersion, long newTerm) {
-        return new ClusterMetadata(newVersion, newTerm, controllerId, controllerEpoch, brokers, topics);
+        return new ClusterMetadata(newVersion, newTerm, controllerId, controllerEpoch, brokers, topics, settings);
     }
 
     public ClusterMetadata withController(int id, long epoch) {
-        return new ClusterMetadata(version, term, id, epoch, brokers, topics);
+        return new ClusterMetadata(version, term, id, epoch, brokers, topics, settings);
     }
 
     public ClusterMetadata withBrokerAlive(int id, boolean alive) {
         Map<Integer, BrokerInfo> b = new TreeMap<>(brokers);
         BrokerInfo old = b.get(id);
         if (old != null) b.put(id, new BrokerInfo(id, old.url(), alive));
-        return new ClusterMetadata(version, term, controllerId, controllerEpoch, b, topics);
+        return new ClusterMetadata(version, term, controllerId, controllerEpoch, b, topics, settings);
     }
 
     public ClusterMetadata withTopic(TopicMetadata t) {
         Map<String, TopicMetadata> m = new TreeMap<>(topics);
         m.put(t.name(), t);
-        return new ClusterMetadata(version, term, controllerId, controllerEpoch, brokers, m);
+        return new ClusterMetadata(version, term, controllerId, controllerEpoch, brokers, m, settings);
     }
 
     public ClusterMetadata withPartition(String topic, PartitionMetadata p) {
         return withTopic(topics.get(topic).withPartition(p));
+    }
+
+    public ClusterMetadata withSetting(String key, String value) {
+        Map<String, String> m = new TreeMap<>(settings);
+        m.put(key, value);
+        return new ClusterMetadata(version, term, controllerId, controllerEpoch, brokers, topics, m);
+    }
+
+    public String setting(String key, String fallback) {
+        return settings.getOrDefault(key, fallback);
     }
 
     public Optional<PartitionMetadata> partition(String topic, int partition) {

@@ -108,6 +108,19 @@ public class Controller {
                 + (req.isr().size() < before.size() ? " (뒤처진 사본 제외)" : " (따라잡은 사본 복귀)"));
     }
 
+    // ------------------------------------------------------------------ 클러스터 설정
+
+    /** 클러스터 설정을 바꾼다. 메타데이터에 넣어 과반에 복제한다 (브로커가 재시작해도 남는다). */
+    public void setSetting(String key, String value) {
+        if (!raft.isLeader()) {
+            forwardToController("/admin/settings?key=" + java.net.URLEncoder.encode(key, java.nio.charset.StandardCharsets.UTF_8)
+                    + "&value=" + java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8), Map.of(), Map.class);
+            return;
+        }
+        await(raft.propose(m -> m.withSetting(key, value)));
+        raft.note("설정 " + key + " = " + value);
+    }
+
     // ------------------------------------------------------------------ 생사 감시와 장애 복구
 
     @Scheduled(fixedDelay = 500)

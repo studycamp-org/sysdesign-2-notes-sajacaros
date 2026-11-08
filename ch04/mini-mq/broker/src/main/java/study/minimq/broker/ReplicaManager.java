@@ -93,10 +93,12 @@ public class ReplicaManager {
     private final List<BiConsumer<String, Integer>> leaderListeners = new CopyOnWriteArrayList<>();
     private volatile ClusterMetadata meta;
     private volatile long replicationDelayMs; // 실험용: 팔로워가 가져가기 전에 쉬는 시간
+    private final Traces traces;
 
-    public ReplicaManager(BrokerProperties props, RaftNode raft) {
+    public ReplicaManager(BrokerProperties props, RaftNode raft, Traces traces) {
         this.props = props;
         this.raft = raft;
+        this.traces = traces;
         this.dataDir = Path.of(props.dataDir());
         this.meta = raft.committed();
         raft.addListener(this::onMetadata);
@@ -211,6 +213,9 @@ public class ReplicaManager {
             throw new ResponseStatusException(HttpStatus.PRECONDITION_FAILED, "팔로워가 리더보다 앞서 있다. 잘라내고 다시 오라");
         }
         r.followers.put(replicaId, new FollowerState(offset, System.currentTimeMillis()));
+        // 팔로워가 offset 을 달라고 왔다 = 그 앞까지는 이미 받아 저장했다
+        traces.hit(topic, partition, 0, offset, "replicated", "broker-" + replicaId,
+                "broker-" + replicaId + " 가 offset {offset} 을 복제함 (리더에서 가져감)");
         maybeAdvanceHighWatermark(r);
         return r.log.awaitLogEnd(offset + 1)
                 .completeOnTimeout(null, waitMs, TimeUnit.MILLISECONDS)
@@ -230,6 +235,12 @@ public class ReplicaManager {
             FollowerState f = r.followers.get(id);
             hw = Math.min(hw, f == null ? r.log.highWatermark() : f.logEnd()); // 모르는 팔로워가 있으면 HW 는 제자리
         }
+        // HW 를 올리면 기다리던 소비자가 바로 깨어나므로, 추적 기록은 올리기 전에 남긴다
+        long next = Math.min(hw, r.log.logEndOffset());
+        if (next > r.log.highWatermark()) {
+            traces.hit(r.topic, r.partition, 0, next, "hw", "",
+                    "HW 가 offset {offset} 을 넘음 → ISR " + r.meta.isr() + " 전원에 있음, 소비 가능");
+        }
         r.log.advanceHighWatermark(hw);
     }
 
@@ -245,7 +256,16 @@ public class ReplicaManager {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
                     "NOT_ENOUGH_REPLICAS: ISR " + r.meta.isr() + " < 최소 ISR " + r.minIsr);
         }
-        long[] range = r.log.appendAsLeader(records, r.roleEpoch);
+        // 추적할 메시지는 팔로워를 깨우기 전에 등록한다 (안 그러면 빠른 팔로워의 복제 단계를 놓칠 수 있다)
+        long[] range = r.log.appendAsLeader(records, r.roleEpoch, base -> {
+            for (int i = 0; i < records.size(); i++) {
+                String key = records.get(i).key();
+                if (key == null || !key.startsWith(Traces.PREFIX)) continue;
+                traces.record(key, "stored", "broker-" + props.brokerId(), "리더 broker-" + props.brokerId() + " 가 " + topic + "-" + partition
+                        + " 의 offset " + (base + i) + " 으로 저장 (leader epoch " + r.roleEpoch + ", 아직 HW 앞이라 소비자는 못 봄)");
+                traces.registerAndBroadcast(new Traces.Trace(key, topic, partition, base + i, System.currentTimeMillis()));
+            }
+        });
         maybeAdvanceHighWatermark(r); // ISR 이 리더 혼자면 바로 오른다
         if (acks >= 0 || records.isEmpty()) return CompletableFuture.completedFuture(range);
         CompletableFuture<long[]> done = new CompletableFuture<>();

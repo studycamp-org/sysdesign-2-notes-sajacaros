@@ -44,6 +44,13 @@
   .events td:first-child { white-space: nowrap; color: var(--muted); width: 1%; }
   details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
   .bad { color: var(--bad); font-weight: 600; }
+  .flowbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; margin-bottom: 6px; }
+  .flowbar select { font: inherit; font-size: 12px; padding: 1px 4px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+  .flowbar .sep { width: 1px; height: 18px; background: var(--line); }
+  button.send { background: #c99a1e; border-color: #c99a1e; color: #fff; font-weight: 600; }
+  .trace td { font-size: 13px; padding: 3px 8px; vertical-align: top; }
+  .trace td:first-child { white-space: nowrap; color: var(--muted); width: 1%; text-align: right; font-variant-numeric: tabular-nums; }
+  .trace .wait td { color: var(--muted); font-style: italic; }
   .two { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   @media (max-width: 900px) { .two { grid-template-columns: 1fr; } }
 </style>
@@ -56,6 +63,15 @@
 </header>
 <main>
   <section class="card">
+    <div class="flowbar">
+      <button id="auto" onclick="toggleAuto()" title="생산자들의 자동 생산을 켜고 끈다 (클러스터 설정 demo.autoProduce, 컨트롤러가 복제)">…</button>
+      <span class="sep"></span>
+      <span>📨 한 건 보내기</span>
+      <select id="tTopic" title="토픽"></select>
+      <select id="tAcks" title="acks"><option value="1">acks=1</option><option value="all">acks=all</option><option value="0">acks=0</option></select>
+      <button class="send" onclick="sendOne()">보내기</button>
+      <span class="muted" id="tMsg"></span>
+    </div>
     <svg id="flow" viewBox="0 0 1100 600" role="img" aria-label="생산자에서 소비자까지의 흐름과 컨트롤러"></svg>
     <div class="legend">
       <span><i style="border-color:var(--data)"></i>메시지 (굵기 = 초당 건수)</span>
@@ -68,7 +84,9 @@
 
   <div class="two">
     <section>
-      <h2>이벤트</h2>
+      <h2>📨 한 건의 여정 <span class="muted" id="trTitle"></span></h2>
+      <div class="card"><table class="trace"><tbody id="trace"><tr class="wait"><td></td><td>위의 "보내기"를 누르면 메시지 하나가 지나가는 단계가 여기 나온다. 자동 생산을 끄면 그림에서도 그 한 건만 보인다.</td></tr></tbody></table></div>
+      <h2 style="margin-top:14px">이벤트</h2>
       <div class="card"><table class="events"><tbody id="events"></tbody></table></div>
     </section>
     <section>
@@ -97,6 +115,78 @@ const anim = (r) => {
 };
 const curve = (x1, y1, x2, y2) => { const dx = (x2 - x1) * 0.5; return `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`; };
 
+let currentTrace = new URLSearchParams(location.search).get('trace'); // ?trace=trace-xxxx 로 특정 한 건을 열 수 있다
+
+async function toggleAuto() {
+  const b = document.getElementById('auto');
+  const next = b.dataset.state === 'off' ? 'on' : 'off';
+  b.disabled = true;
+  await fetch(`/admin/settings?key=demo.autoProduce&value=${next}`, {method: 'POST'}).catch(() => {});
+  b.disabled = false;
+  refresh();
+}
+
+async function sendOne() {
+  const topic = document.getElementById('tTopic').value, acks = document.getElementById('tAcks').value;
+  const msg = document.getElementById('tMsg');
+  msg.textContent = '보내는 중…';
+  try {
+    const r = await (await fetch(`/admin/trace/send?topic=${encodeURIComponent(topic)}&acks=${acks}`, {method: 'POST'})).json();
+    currentTrace = r.id;
+    msg.textContent = r.error ? `실패: ${r.error}` : `${r.id} → ${topic}-${r.partition} offset ${r.offset}`;
+  } catch (e) { msg.textContent = '실패'; }
+  refresh();
+}
+
+function flowbar(meta) {
+  const on = (meta.settings || {})['demo.autoProduce'] !== 'off';
+  const b = document.getElementById('auto');
+  b.dataset.state = on ? 'on' : 'off';
+  b.className = on ? '' : 'on';
+  b.textContent = on ? '⏸ 자동 생산 끄기' : '▶ 자동 생산 켜기 (지금 꺼짐)';
+  const sel = document.getElementById('tTopic');
+  const names = Object.keys(meta.topics).filter(t => !t.startsWith('__')).sort();
+  if (sel.options.length !== names.length) {
+    const cur = sel.value;
+    sel.innerHTML = names.map(n => `<option>${esc(n)}</option>`).join('');
+    if (names.includes(cur)) sel.value = cur;
+  }
+}
+
+/** 모든 브로커의 추적 기록에서 지금 보는 한 건을 모은다. */
+function traceOf(s) {
+  if (!currentTrace) return null;
+  const up = s.nodes.filter(n => n.reachable);
+  const t = up.flatMap(n => (n.trace || {}).traces || []).find(x => x.id === currentTrace);
+  const events = up.flatMap(n => ((n.trace || {}).events || []).filter(e => e.trace === currentTrace))
+    .sort((a, b) => a.at - b.at || (a.broker === b.broker ? a.seq - b.seq : 0));
+  const seen = new Set();
+  const uniq = events.filter(e => { const k = e.step + '|' + e.who; if (seen.has(k)) return false; seen.add(k); return true; });
+  return {id: currentTrace, t, events: uniq,
+    key: t ? `${t.topic}-${t.partition}` : null,
+    has: (step, who) => uniq.some(e => e.step === step && (who === undefined || e.who === who))};
+}
+
+function traceView(s, tr) {
+  const body = document.getElementById('trace');
+  if (!tr) return;
+  document.getElementById('trTitle').textContent = tr.t ? `${tr.id} · ${tr.t.topic}-${tr.t.partition} offset ${tr.t.offset}` : tr.id;
+  const t0 = tr.events.length ? tr.events[0].at : 0;
+  const icon = {routed: '🧭', stored: '💾', replicated: '📋', hw: '✅', acked: '📬', fetched: '📥', committed: '📌', failed: '❌'};
+  let rows = tr.events.map(e => `<tr><td>+${e.at - t0}ms</td><td>${icon[e.step] || '•'} <span class="dot" style="background:${C(e.broker)}" title="broker-${e.broker} 에서 기록"></span> ${esc(e.text)}</td></tr>`).join('');
+  // 아직 안 일어난 단계
+  const waits = [];
+  if (tr.t) {
+    const p = (s.metadata.topics[tr.t.topic] || {partitions: []}).partitions[tr.t.partition];
+    if (p) p.isr.filter(id => id !== p.leader && !tr.has('replicated', 'broker-' + id)).forEach(id => waits.push(`broker-${id} 의 복제를 기다리는 중`));
+    if (!tr.has('hw')) waits.push('HW 가 넘어가길 기다리는 중 (그 전엔 소비자에게 안 보인다)');
+    if (!tr.has('fetched')) waits.push('소비자가 가져가길 기다리는 중');
+    else if (!tr.has('committed')) waits.push('소비자 그룹의 오프셋 커밋을 기다리는 중');
+  }
+  rows += waits.map(w => `<tr class="wait"><td>…</td><td>${esc(w)}</td></tr>`).join('');
+  body.innerHTML = rows || '<tr class="wait"><td></td><td>기록을 모으는 중…</td></tr>';
+}
+
 async function act(action, id, value) {
   await fetch(`/admin/cluster/${action}?id=${id}` + (value !== undefined ? `&value=${value}` : ''), {method: 'POST'}).catch(() => {});
   setTimeout(refresh, 300);
@@ -115,6 +205,8 @@ function tools(nodes) {
 
 function draw(s) {
   const meta = s.metadata, nodes = s.nodes;
+  const tr = traceOf(s);
+  const GOLD = '#c99a1e';
   const up = nodes.filter(n => n.reachable);
   const traffic = up.flatMap(n => (n.traffic || []).map(t => ({...t, broker: n.id})));
   const reps = {};
@@ -169,9 +261,11 @@ function draw(s) {
         const inIsr = p.isr.includes(id), cx = PX + 40 + i * 26;
         const r = (reps[key] || {})[id];
         const tip = `broker-${id}${id === p.leader ? ' (리더)' : ''}${inIsr ? ' · ISR' : ' · ISR 밖'}${r ? ' · LEO ' + r.logEndOffset : ''}`;
-        return `<g><title>${tip}</title><rect x="${cx}" y="${cy - 10}" width="20" height="20" rx="4" fill="${inIsr ? C(id) : 'none'}"
+        const got = tr && tr.key === key && (id === p.leader ? tr.has('stored') : tr.has('replicated', 'broker-' + id));
+        return `<g><title>${tip}${got ? ' · 📨 받음' : ''}</title><rect x="${cx}" y="${cy - 10}" width="20" height="20" rx="4" fill="${inIsr ? C(id) : 'none'}"
           stroke="${C(id)}" stroke-width="2" stroke-dasharray="${inIsr ? '' : '3 2'}" opacity="${(meta.brokers[id] || {}).alive === false ? 0.3 : 1}"/>
-          <text x="${cx + 10}" y="${cy + 4}" text-anchor="middle" font-size="11" font-weight="700" fill="${inIsr ? '#fff' : C(id)}">${id === p.leader ? '★' : id}</text></g>`;
+          <text x="${cx + 10}" y="${cy + 4}" text-anchor="middle" font-size="11" font-weight="700" fill="${inIsr ? '#fff' : C(id)}">${id === p.leader ? '★' : id}</text>
+          ${got ? `<circle cx="${cx + 19}" cy="${cy - 10}" r="6" fill="${GOLD}" stroke="var(--card)" stroke-width="1.5"/><text x="${cx + 19}" y="${cy - 7}" text-anchor="middle" font-size="8" font-weight="700" fill="#fff">✓</text>` : ''}</g>`;
       }).join('');
       // 복제: 리더 칸 → 팔로워 칸 화살표. 최근에 가져갔고 따라잡았으면 흐르고, 뒤처지면 주황, ISR 밖이면 빨강
       let repl = '';
@@ -189,7 +283,9 @@ function draw(s) {
       const pending = lead ? lead.logEndOffset - lead.highWatermark : 0;
       const sub = off ? '<tspan fill="var(--bad)">리더 없음</tspan>'
         : lead ? `LEO ${lead.logEndOffset} · HW ${lead.highWatermark}${pending > 0 ? ` <tspan fill="var(--warn)">미복제 ${pending}</tspan>` : ''}` : '<tspan fill="var(--muted)">리더 응답 없음</tspan>';
-      parts += `<rect x="${PX - PW / 2}" y="${y}" width="${PW}" height="${PH}" rx="7" fill="var(--card)" stroke="${off ? 'var(--bad)' : 'var(--line)'}" stroke-width="${off ? 2 : 1}"/>
+      const traced = tr && tr.key === key;
+      const ttag = traced ? `<text x="${PX - PW / 2 + 70}" y="${cy - 3}" font-size="11" font-weight="700" fill="${GOLD}">📨 offset ${tr.t.offset}${tr.has('hw') ? ' · HW✓' : ''}</text>` : '';
+      parts += `<rect x="${PX - PW / 2}" y="${y}" width="${PW}" height="${PH}" rx="7" fill="var(--card)" stroke="${traced ? GOLD : off ? 'var(--bad)' : 'var(--line)'}" stroke-width="${traced ? 3 : off ? 2 : 1}"/>${ttag}
         <rect x="${PX - PW / 2}" y="${y}" width="6" height="${PH}" rx="3" fill="${off ? 'var(--bad)' : C(p.leader)}"/>
         <text x="${PX - PW / 2 + 14}" y="${cy - 3}" font-size="13" font-weight="700">${key}</text>
         <text x="${PX - PW / 2 + 14}" y="${cy + 12}" font-size="10.5" fill="var(--muted)">${sub}</text>${chips}${repl}`;
@@ -213,7 +309,7 @@ function draw(s) {
     for (let i = 1; i < list.length; i++) list[i].y = Math.max(list[i].y, list[i - 1].y + 90);
     return list;
   };
-  const producers = clients('produce');
+  const producers = clients('produce').filter(c => c.name !== '📨 한 건');
   const CX = {produce: 100, fetch: 1005}, NW = 180, NH = 50;
 
   // 파티션별 커밋 오프셋 → lag (HW - 1 - 커밋)
@@ -270,7 +366,8 @@ function draw(s) {
     const lag = Object.entries(lagOfPart).filter(([k]) => k.startsWith(g.group + '|')).reduce((a, [, v]) => a + v, 0);
     gnodes += `<rect x="${x0}" y="${g.y}" width="${GW}" height="${g.h}" rx="12" fill="none" stroke="${color}" stroke-width="1.5" stroke-dasharray="${g.state === 'STABLE' ? '' : '6 4'}"/>
       <text x="${x0 + 10}" y="${g.y + 17}" font-size="12" font-weight="700">${esc(g.group)}</text>
-      <text x="${x0 + GW - 10}" y="${g.y + 17}" text-anchor="end" font-size="11.5" fill="${color}" font-weight="600"><title>세대(generation): 재조정이 끝날 때마다 1씩 오른다</title>세대 ${g.generation} · ${label}</text>`;
+      <text x="${x0 + GW - 10}" y="${g.y + 17}" text-anchor="end" font-size="11.5" fill="${color}" font-weight="600"><title>세대(generation): 재조정이 끝날 때마다 1씩 오른다</title>세대 ${g.generation} · ${label}</text>
+      ${tr && tr.t && tr.t.topic === g.topic && tr.has('committed', 'group ' + g.group) ? `<text x="${x0 + 12 + 7.5 * g.group.length}" y="${g.y + 17}" font-size="11" font-weight="700" fill="${GOLD}">📌 커밋됨</text>` : ''}`;
     // 오프셋 커밋 → 코디네이터 브로커
     if (BX[g.coordinator]) {
       const active = commitBy[g.group];
@@ -290,7 +387,9 @@ function draw(s) {
       const sub = idle ? (g.state === 'STABLE' ? '놀고 있음 (파티션 < 소비자)' : '배정 기다리는 중')
         : `파티션 ${m.assigned.join(',')} · ${rate}/초 · lag ${mlag}`;
       gnodes += `<g opacity="${idle || !m.joined && g.state === 'PREPARING_REBALANCE' ? 0.5 : 1}">
-        <rect x="${CX.fetch - NW / 2}" y="${my - MH / 2}" width="${NW}" height="${MH}" rx="9" fill="var(--card)" stroke="var(--data)" stroke-width="${m.id === g.leader ? 2.5 : 1.2}"/>
+        <rect x="${CX.fetch - NW / 2}" y="${my - MH / 2}" width="${NW}" height="${MH}" rx="9" fill="var(--card)"
+          stroke="${tr && tr.has('fetched', m.clientId) ? GOLD : 'var(--data)'}" stroke-width="${tr && tr.has('fetched', m.clientId) ? 3.5 : m.id === g.leader ? 2.5 : 1.2}"/>
+        ${tr && tr.has('fetched', m.clientId) ? `<text x="${CX.fetch + NW / 2 - 64}" y="${my - 5}" font-size="13" text-anchor="end"><title>📨 이 소비자가 가져감</title>📥</text>` : ''}
         <text x="${CX.fetch - NW / 2 + 10}" y="${my - 4}" font-weight="700" font-size="12.5">${esc(tag)}${m.id === g.leader ? ' <tspan font-size="11" fill="var(--accent)">리더</tspan>' : ''}</text>
         <text x="${CX.fetch - NW / 2 + 10}" y="${my + 13}" font-size="11" fill="var(--muted)">${esc(sub)}</text>
         <g data-group="${esc(g.group)}" data-member="${esc(m.id)}" data-cmd="crash" style="cursor:pointer"><title>멈춤: 15초 동안 박동도 소비도 멈춘다 (장애 흉내, 그림 4.20)</title>
@@ -300,6 +399,26 @@ function draw(s) {
       </g>`;
     });
   });
+
+  // 📨 한 건의 경로: 보낸 곳 → 토픽 허브 → 파티션 → 가져간 소비자 → (커밋) 코디네이터
+  let tracePath = '';
+  if (tr && tr.t && PY[tr.key] !== undefined) {
+    let ty = PY[tr.key];
+    for (const c of producers) if (Math.abs(c.y - ty) < 80) ty = c.y + 90;
+    const gold = (d, title, dash = '10 6', w = 3.2) => `<path d="${d}" fill="none" stroke="${GOLD}" stroke-width="${w}" stroke-dasharray="${dash}" ${anim(40)}><title>${title}</title></path>`;
+    tracePath += gold(curve(CX.produce + 40, ty, HUBX, topicY[tr.t.topic]), '📨 생산자 → 토픽 ' + tr.t.topic)
+      + gold(curve(HUBX, topicY[tr.t.topic], PX - PW / 2, PY[tr.key]), `hash(key) % 파티션 수 → ${tr.key}`);
+    const fetcher = tr.events.find(e => e.step === 'fetched');
+    if (fetcher && pos[fetcher.who]) {
+      const [mx, my] = pos[fetcher.who];
+      tracePath += gold(curve(PX + PW / 2, PY[tr.key], mx - NW / 2, my), `${tr.key} → ${fetcher.who} (HW 를 넘은 뒤 가져감)`);
+      const com = tr.events.find(e => e.step === 'committed');
+      if (com && BX[com.broker]) tracePath += gold(`M${mx + NW / 2 - 6},${my - MH / 2} Q${mx + NW / 2 + 30},${BY + 60} ${BX[com.broker] + BW / 2},${BY + 25}`,
+        `오프셋 커밋 → 코디네이터 broker-${com.broker}`, '3 5', 2.4);
+    }
+    tracePath += `<g><rect x="${CX.produce - 40}" y="${ty - 17}" width="80" height="34" rx="9" fill="var(--card)" stroke="${GOLD}" stroke-width="2.5"/>
+      <text x="${CX.produce}" y="${ty + 5}" text-anchor="middle" font-size="13" font-weight="700">📨 한 건</text><title>${esc(tr.id)}</title></g>`;
+  }
 
   // 라우팅(지도 받기): 클라이언트 → 브로커
   traffic.filter(t => t.kind === 'metadata' && t.agoMs < 8000 && pos[t.client] && BX[t.broker]).forEach(t => {
@@ -322,7 +441,7 @@ function draw(s) {
   const fullH = Math.max(y + 10, 330, ...producers.map(c => c.y + NH), ...groups.map(g => g.y + g.h + 10));
   const el = document.getElementById('flow');
   el.setAttribute('viewBox', `0 0 1100 ${fullH}`);
-  el.innerHTML = edges + svg + parts + cl + heads;
+  el.innerHTML = edges + svg + parts + cl + heads + tracePath;
 }
 
 function tables(s) {
@@ -358,8 +477,10 @@ async function refresh() {
   try { s = await (await fetch('/admin/cluster')).json(); }
   catch (e) { document.getElementById('updated').textContent = '연결 안 됨 — 8081~8083 중 다른 포트로'; return; }
   tools(s.nodes);
+  flowbar(s.metadata);
   draw(s);
   tables(s);
+  traceView(s, traceOf(s));
   document.getElementById('updated').textContent = time(Date.now());
 }
 document.getElementById('flow').addEventListener('click', async (e) => {

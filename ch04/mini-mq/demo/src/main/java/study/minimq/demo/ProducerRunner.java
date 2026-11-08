@@ -13,6 +13,7 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
+import study.minimq.client.ClusterView;
 import study.minimq.client.MiniMqHttp;
 import study.minimq.client.Producer;
 import study.minimq.common.TopicInfo;
@@ -45,6 +46,8 @@ class ProducerRunner implements ApplicationRunner {
     }
 
     private final DemoProperties props;
+    /** 대시보드의 "자동 생산" 스위치. 클러스터 설정 demo.autoProduce 를 1초마다 확인한다. */
+    private volatile boolean paused;
 
     ProducerRunner(DemoProperties props) {
         this.props = props;
@@ -61,6 +64,7 @@ class ProducerRunner implements ApplicationRunner {
         MiniMqHttp.setClientId("producer-" + props.name());
         String run = Long.toHexString(System.nanoTime() & 0xffffff); // 생산자가 재시작하면 seq 가 1부터 다시 시작하므로 구분용
 
+        Thread.ofVirtual().name("settings").start(this::watchSettings);
         List<Thread> threads = new ArrayList<>();
         for (Spec spec : specs) {
             Startup.createTopic(props.bootstrap(), new TopicInfo(spec.topic(), spec.partitions(),
@@ -68,6 +72,24 @@ class ProducerRunner implements ApplicationRunner {
             threads.add(Thread.ofVirtual().name("produce-" + spec.topic()).start(() -> produce(spec, run)));
         }
         for (Thread t : threads) t.join();
+    }
+
+    private void watchSettings() {
+        ClusterView view = new ClusterView(props.bootstrap());
+        while (true) {
+            try {
+                boolean off = "off".equals(view.refresh().setting("demo.autoProduce", "on"));
+                if (off != paused) log.info(off ? "⏸ 자동 생산 꺼짐 (대시보드)" : "▶ 자동 생산 켜짐 (대시보드)");
+                paused = off;
+            } catch (Exception ignored) {
+                // 브로커가 잠깐 안 되면 지금 상태를 유지
+            }
+            try {
+                Thread.sleep(1_000);
+            } catch (InterruptedException e) {
+                return;
+            }
+        }
     }
 
     /** 토픽 하나에 정해진 속도로 계속 보낸다. 생산자 객체는 토픽마다 따로(acks 가 다르니까). */
@@ -84,6 +106,11 @@ class ProducerRunner implements ApplicationRunner {
             long next = System.nanoTime();
             long lastReport = System.currentTimeMillis();
             while (!Thread.currentThread().isInterrupted()) {
+                if (paused) {
+                    LockSupport.parkNanos(200_000_000L);
+                    next = System.nanoTime(); // 다시 켰을 때 밀린 만큼 몰아서 보내지 않게
+                    continue;
+                }
                 ThreadLocalRandom r = ThreadLocalRandom.current();
                 int server = r.nextInt(props.servers());
                 long s = ++seq[server];

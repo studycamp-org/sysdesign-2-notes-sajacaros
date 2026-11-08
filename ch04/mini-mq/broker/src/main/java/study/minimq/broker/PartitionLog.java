@@ -81,11 +81,16 @@ final class PartitionLog {
 
     /** 리더로서 묶음을 끝에 붙이고 [첫 오프셋, 마지막 오프셋] 을 돌려준다. */
     synchronized long[] appendAsLeader(List<ProduceRecord> records, int leaderEpoch) {
+        return appendAsLeader(records, leaderEpoch, null);
+    }
+
+    /** beforeWake: 저장 직후, 기다리던 팔로워를 깨우기 전에 불린다 (첫 오프셋을 받는다). 메시지 추적 등록용. */
+    synchronized long[] appendAsLeader(List<ProduceRecord> records, int leaderEpoch, java.util.function.LongConsumer beforeWake) {
         long base = logEndOffset();
         if (records.isEmpty()) return new long[]{base, base - 1};
         List<Message> msgs = new ArrayList<>(records.size());
         for (int i = 0; i < records.size(); i++) msgs.add(Message.create(topic, partition, base + i, leaderEpoch, records.get(i)));
-        write(msgs);
+        write(msgs, beforeWake == null ? null : () -> beforeWake.accept(base));
         return new long[]{base, base + records.size() - 1};
     }
 
@@ -96,10 +101,10 @@ final class PartitionLog {
         if (msgs.get(0).offset() != expected) {
             throw new IllegalStateException(topic + "-" + partition + " 복제 오프셋 불일치: LEO " + expected + ", 받은 것 " + msgs.get(0).offset());
         }
-        write(msgs);
+        write(msgs, null);
     }
 
-    private void write(List<Message> msgs) {
+    private void write(List<Message> msgs, Runnable beforeWake) {
         try {
             if (active().bytes() >= segmentBytes) roll();
             List<byte[]> payloads = new ArrayList<>(msgs.size());
@@ -114,6 +119,7 @@ final class PartitionLog {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+        if (beforeWake != null) beforeWake.run();
         wake(leoWaiters, logEndOffset());
     }
 
