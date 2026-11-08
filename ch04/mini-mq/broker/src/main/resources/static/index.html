@@ -80,7 +80,7 @@
     </div>
     <div class="legend">
       <span><i style="border-color:var(--data)"></i>데이터: 메시지가 움직임 (생산 · 복제 · 소비)</span>
-      <span><i style="border-color:var(--ctrl);border-top-style:dashed"></i>컨트롤: 박동 · 지도(메타데이터) · HW · ACK · 오프셋 커밋</span>
+      <span><i style="border-color:var(--ctrl);border-top-style:dashed"></i>컨트롤: 조정 서비스 세션 박동 · 지도(/metadata) · HW · ACK · 오프셋 커밋</span>
       <span>사본 줄: <b>★</b> 리더 · 실선 ISR · 점선 ISR 밖 · 같은 색 = 같은 파티션</span>
     </div>
   </section>
@@ -164,7 +164,7 @@ async function flushFrom(name) {
 
 function tools(nodes) {
   document.getElementById('tools').innerHTML = nodes.map(n => {
-    const d = n.replicationDelayMs || 0, iso = n.reachable && n.raft.isolated;
+    const d = n.replicationDelayMs || 0, iso = n.reachable && n.coord.isolated;
     return `<span class="tool"><span class="dot" style="background:${C(n.id)}"></span>broker-${n.id}
       <button class="${iso ? 'on' : ''}" ${n.reachable ? '' : 'disabled'} onclick="act('isolate',${n.id},${!iso})" title="네트워크에서 떼어 낸다">고립</button>
       <button class="${d ? 'on' : ''}" ${n.reachable ? '' : 'disabled'} onclick="act('slow',${n.id},${({0: 2000, 2000: 6000})[d] ?? 0})"
@@ -180,7 +180,7 @@ function sendbar(s) {
       <button class="send" ${p.reachable && p.ready ? '' : 'disabled'} onclick="sendFrom('${esc(p.name)}', 5)">5건</button>
       <button ${p.reachable && p.ready ? '' : 'disabled'} onclick="flushFrom('${esc(p.name)}')" title="덜 찬 묶음도 지금 리더에게 보낸다">지금 보내기</button></span>`).join('');
   const el2 = lastElection(s);
-  const elect = `<span class="grp">👑 컨트롤러 선출 ${el2 ? `<span class="muted">최근: term ${el2.E.term} broker-${el2.E.node} (${time(el2.E.at)})</span>` : ''}
+  const elect = `<span class="grp">👑 컨트롤러 선출 ${el2 ? `<span class="muted">최근: broker-${el2.E.node} (${time(el2.E.at)})</span>` : ''}
       <button class="send" style="background:var(--ctrl);border-color:var(--ctrl)" ${el2 ? '' : 'disabled'} onclick="startReplay('election')">천천히 보기</button></span>`;
   const all = html + elect;
   if (el.dataset.html !== all) { el.innerHTML = all; el.dataset.html = all; }
@@ -208,7 +208,6 @@ function visibleTrace(tr) {
 
 // ------------------------------------------------------------------ 천천히 재생 (한 건 또는 선거)
 // mode = 'trace': 메시지 한 건의 기록 / 'election': 가장 최근 컨트롤러 선출의 Raft 이벤트
-const RAFT_ICON = {timeout: '⏱', vote: '🗳', deny: '✋', stepdown: '⬇', elected: '👑', follow: '🤝', reject: '⛔', commit: '📜', isolate: '🔌', start: '▶'};
 let GEO = null; // 마지막으로 그린 브로커 상자 위치
 
 function steps() { return replay.mode === 'election' ? replay.steps : (traceOf(lastState) || {all: []}).all; }
@@ -217,7 +216,7 @@ function startReplay(mode) {
   if (!lastState) return;
   if (replay.mode === 'election') {
     const el = lastElection(lastState);
-    if (!el) { banner(null, '아직 기록된 선거가 없다 (브로커 이벤트는 최근 40개만 남는다)', 'ctrl'); return; }
+    if (!el) { banner(null, '아직 기록된 선거가 없다 (조정 서비스는 최근 120개 기록만 남긴다)', 'ctrl'); return; }
     replay.steps = el.steps; replay.election = el;
   } else if (!traceOf(lastState)) return;
   pauseReplay();
@@ -237,7 +236,7 @@ function stepNext(manual) {
     if (replay.mode === 'election') {
       replay.playing = false;
       const E = replay.election.E;
-      banner(null, `끝: broker-${E.node} 가 term ${E.term} 컨트롤러가 됐다. ${list.length}단계, 실제로는 ${list.at(-1).at - list[0].at}ms`, 'ctrl');
+      banner(null, `끝: broker-${E.node} 가 컨트롤러가 됐다 (zxid ${E.term}). ${list.length}단계, 실제로는 ${list.at(-1).at - list[0].at}ms`, 'ctrl');
       return;
     }
     const tr = traceOf(lastState);
@@ -257,7 +256,7 @@ function banner(e, text, kind, t0) {
   b.style.borderColor = `var(--${kind})`;
   if (!e) { b.innerHTML = esc(text); return; }
   if (replay.mode === 'election') {
-    b.innerHTML = `${kindTag('ctrl')} <b>${replay.k}.</b> ${RAFT_ICON[e.kind] || '•'} <span class="dot" style="background:${C(e.node)}"></span> <b>broker-${e.node}</b>: ${esc(e.text)} <span class="muted">(term ${e.term}, 실제 +${e.at - t0}ms)</span>`;
+    b.innerHTML = `${kindTag('ctrl')} <b>${replay.k}.</b> ${ZK_ICON[e.kind] || '•'} 🗂 ${esc(e.text)} <span class="muted">(zxid ${e.zxid}, 실제 +${e.at - t0}ms)</span>`;
   } else {
     b.innerHTML = `${kindTag(kind)} <b>${replay.k}.</b> ${STEP_ICON[e.step] || ''} ${esc(e.text)} <span class="muted">(실제 +${e.at - t0}ms)</span>`;
   }
@@ -300,79 +299,95 @@ function playStep(e, t0) {
   moveDot('', seg, color, kind === 'ctrl' ? '6 5' : '', {back: e.step === 'acked'});
 }
 
-// ---------------- 선거
-/** 가장 최근 당선(elected)과 그 앞의 출마부터 당선 뒤 커밋까지. */
+// ---------------- 선거 (조정 서비스의 기록으로): 세션 만료 → /controller 삭제 → 감시 알림 → 먼저 만드는 브로커가 컨트롤러
+const who2id = w => { const m = /broker-(\d+)/.exec(w || ''); return m ? Number(m[1]) : null; };
 function lastElection(s) {
-  const ev = s.nodes.filter(n => n.reachable).flatMap(n => n.raft.events)
-    .sort((a, b) => a.at - b.at || (a.node === b.node ? a.seq - b.seq : a.node - b.node));
-  const elected = ev.filter(e => e.kind === 'elected');
-  if (!elected.length) return null;
-  const E = elected.at(-1), prev = elected.length > 1 ? elected.at(-2).at : 0;
-  const first = ev.find(e => e.kind === 'timeout' && e.at > prev && e.at <= E.at && e.at >= E.at - 20000);
-  const start = first ? first.at : E.at - 3000;
-  const KEEP = new Set(['timeout', 'vote', 'deny', 'stepdown', 'elected', 'follow', 'reject', 'commit', 'isolate']);
-  let commits = 0;
-  const list = ev.filter(e => e.at >= start && e.at <= E.at + 2000 && KEEP.has(e.kind))
-    .filter(e => e.kind !== 'commit' || (e.at >= E.at && commits++ < 3));
-  return {E, steps: list};
+  const ev = ((s.zk || {}).events || []).slice().sort((a, b) => a.seq - b.seq);
+  const wins = ev.filter(e => e.kind === 'created' && e.path === '/controller');
+  if (!wins.length) return null;
+  const E = wins.at(-1), prev = wins.length > 1 ? wins.at(-2).seq : -1;
+  // 시작: 그 앞의 세션 만료나 /controller 삭제. 없으면(처음 기동) 당선 1초 전부터
+  const before = ev.filter(e => e.seq > prev && e.seq < E.seq && (e.kind === 'session_expired' || (e.kind === 'deleted' && e.path === '/controller')));
+  const startSeq = before.length ? before[0].seq : (ev.find(e => e.at >= E.at - 1000) || E).seq;
+  let sets = 0, notes = 0;
+  const steps = ev.filter(e => e.seq >= startSeq && e.at <= E.at + 3000).filter(e => {
+    if (e.kind === 'session_expired') return true;
+    if (e.kind === 'deleted') return e.path === '/controller' || e.path.startsWith('/brokers/');
+    if (e.kind === 'create_conflict' || e.kind === 'created') return e.path === '/controller';
+    if (e.kind === 'notify') return e.seq <= E.seq + 3 && notes++ < 2;
+    if (e.kind === 'set') return e.path === '/metadata' && e.seq > E.seq && sets++ < 2;
+    return false;
+  }).map(e => ({...e, node: who2id(e.who) ?? 0}));
+  return {E: {...E, node: who2id(E.who), term: E.zxid}, steps};
 }
-/** 단계 k 까지 적용한 각 브로커의 상태 (역할·term·투표). */
+const ZK_ICON = {session_expired: '💀', deleted: '🗑', notify: '🔔', create_conflict: '✋', created: '👑', set: '📜'};
+/** 단계 k 까지 적용한 상태: /controller 주인, 브로커별 세션. */
 function electionState(list, k, ids) {
-  const st = {};
-  ids.forEach(b => { st[b] = {role: '팔로워', term: null, voted: null, votes: 0, leader: null}; });
+  const st = {holder: null, brokers: {}};
+  ids.forEach(b => { st.brokers[b] = {session: true, lost: false}; });
   list.slice(0, k).forEach(e => {
-    const n = (st[e.node] ||= {role: '팔로워', votes: 0});
-    if (e.term > (n.term ?? -1)) { n.voted = null; n.leader = null; }
-    n.term = e.term;
-    if (e.kind === 'timeout') { n.role = '후보'; n.votes = 1; n.voted = e.node; }
-    if (e.kind === 'vote') {
-      n.role = '팔로워'; n.voted = e.peer;
-      const c = st[e.peer];
-      if (c && c.role === '후보' && c.term === e.term) c.votes++;
-    }
-    if (e.kind === 'stepdown') { n.role = '팔로워'; n.votes = 0; }
-    if (e.kind === 'elected') n.role = '리더';
-    if (e.kind === 'follow') { n.role = '팔로워'; n.leader = e.peer; n.votes = 0; }
+    const b = e.node;
+    if (e.kind === 'session_expired' && st.brokers[b]) st.brokers[b].session = false;
+    if (e.kind === 'deleted' && e.path === '/controller') st.holder = null;
+    if (e.kind === 'created') st.holder = b;
+    if (e.kind === 'create_conflict' && st.brokers[b]) st.brokers[b].lost = true;
   });
   return st;
 }
-/** 재생 중: 브로커 상자 머리를 그 시점의 상태로 덮어 그린다 (지금의 결과가 미리 보이지 않게). */
 function electionBase(e) {
   if (!GEO) return '';
   const ids = Object.keys(GEO.BOX).map(Number);
   const st = electionState(replay.steps, replay.k, ids);
-  return ids.map(b => {
-    const {y} = GEO.BOX[b], x0 = GEO.PX - GEO.PW / 2, n = st[b];
-    const label = n.role === '리더' ? `👑 컨트롤러 · term ${n.term}`
-      : n.role === '후보' ? `🗳 후보 · term ${n.term} · ${n.votes}표 (과반 ${Math.floor(ids.length / 2) + 1})`
-      : `팔로워${n.term != null ? ` · term ${n.term}` : ''}${n.voted && n.voted !== b ? ` · broker-${n.voted} 에게 투표` : ''}${n.leader ? ` · broker-${n.leader} 따름` : ''}`;
-    const color = n.role === '리더' ? 'var(--accent)' : n.role === '후보' ? 'var(--warn)' : 'var(--muted)';
-    const active = e && (e.node === b || e.peer === b);
-    return `<rect x="${x0 + 2}" y="${y + 2}" width="${GEO.PW - 4}" height="44" rx="10" fill="var(--card)"/>
+  const Z = GEO.ZK;
+  let out = `<rect x="${Z.x + 2}" y="${Z.y + 30}" width="${Z.w - 4}" height="22" fill="var(--card)"/>
+    <text x="${Z.x + 14}" y="${Z.y + 44}" font-size="12"><tspan font-weight="700">/controller</tspan> → ${st.holder ? `<tspan font-weight="700" fill="var(--accent)">broker-${st.holder}</tspan>` : '<tspan fill="var(--warn)" font-weight="700">비어 있음</tspan>'} <tspan fill="var(--muted)">⏪ 그 시점</tspan></text>
+    <rect x="${Z.x}" y="${Z.y}" width="${Z.w}" height="${Z.h}" rx="12" fill="none" stroke="${e && !e.node ? 'var(--ctrl)' : 'none'}" stroke-width="3.5"/>`;
+  ids.forEach(b => {
+    const {y} = GEO.BOX[b], x0 = GEO.PX - GEO.PW / 2, n = st.brokers[b];
+    const label = st.holder === b ? '👑 컨트롤러' : !n.session ? '💀 세션 만료' : n.lost ? '브로커 (자리 경쟁에서 짐)' : '브로커';
+    const color = st.holder === b ? 'var(--accent)' : !n.session ? 'var(--bad)' : 'var(--muted)';
+    const active = e && e.node === b;
+    out += `<rect x="${x0 + 2}" y="${y + 2}" width="${GEO.PW - 4}" height="44" rx="10" fill="var(--card)"/>
       <rect x="${x0}" y="${y}" width="${GEO.PW}" height="${GEO.BOX[b].h}" rx="12" fill="none" stroke="${active ? 'var(--ctrl)' : 'none'}" stroke-width="3.5"/>
       <text x="${x0 + 14}" y="${y + 21}" font-weight="700" font-size="14">broker-${b}</text>
       <text x="${x0 + 92}" y="${y + 21}" font-size="12.5" font-weight="700" fill="${color}">${esc(label)}</text>
       <text x="${x0 + 14}" y="${y + 39}" font-size="11" fill="var(--muted)">⏪ 재생 중: 그 시점의 상태</text>`;
-  }).join('');
+  });
+  return out;
 }
-function headPt(b) { return [GEO.PX - GEO.PW / 2, GEO.BOX[b].y + 22]; }
-function arc(a, b) {
-  const [x, y1] = headPt(a), [, y2] = headPt(b), bulge = 50 + Math.abs(y2 - y1) / 7;
-  return `M${x},${y1} C${x - bulge},${y1} ${x - bulge},${y2} ${x},${y2}`;
+function zkPt() { const Z = GEO.ZK; return [Z.x + Z.w, Z.y + Z.h / 2]; }
+function brokerPt(b) { return [GEO.PX + GEO.PW / 2, GEO.BOX[b].y + 22]; }
+function zkPath(b) { // 브로커 → 조정 서비스 (세션 선과 같은 길)
+  const [x1, y1] = zkPt(), [x2, y2] = brokerPt(b), bulge = 40 + Math.abs(y2 - y1) / 12;
+  return `M${x2},${y2} C${x2 + bulge},${y2} ${x1 + bulge},${y1} ${x1},${y1}`;
 }
 function playElection(e, t0) {
   banner(e, '', 'ctrl', t0);
   const base = electionBase(e);
-  if (!GEO || !GEO.BOX[e.node]) { document.getElementById('overlay').innerHTML = base; return; }
-  const has = e.peer != null && GEO.BOX[e.peer];
-  if ((e.kind === 'vote' || e.kind === 'deny') && has) // 후보 → 투표자(요청) → 후보(찬성/거절)
-    return moveDot(base, arc(e.peer, e.node), 'var(--ctrl)', '6 5', {pingpong: true, backColor: e.kind === 'vote' ? 'var(--ok)' : 'var(--bad)'});
-  if ((e.kind === 'follow' || e.kind === 'stepdown') && has) // 리더의 박동 / 더 높은 term 을 실은 메시지
-    return moveDot(base, arc(e.peer, e.node), 'var(--ctrl)', '6 5');
-  if (e.kind === 'reject' && has)
-    return moveDot(base, arc(e.peer, e.node), 'var(--bad)', '6 5', {pingpong: true});
-  const [x, y] = headPt(e.node);
-  pulse(base, x + 20, y, e.kind === 'elected' ? 'var(--accent)' : e.kind === 'timeout' ? 'var(--warn)' : 'var(--ctrl)');
+  if (!GEO) return;
+  const b = e.node, has = b && GEO.BOX[b];
+  if ((e.kind === 'created' || e.kind === 'create_conflict') && has) // 브로커 → 조정 서비스: /controller 만들기 → 성공/실패
+    return moveDot(base, zkPath(b), 'var(--ctrl)', '6 5', {pingpong: true, backColor: e.kind === 'created' ? 'var(--ok)' : 'var(--bad)'});
+  if (e.kind === 'set' && has) return moveDot(base, zkPath(b), 'var(--ctrl)', '6 5'); // 새 컨트롤러가 /metadata 에 "컨트롤러 = 나"
+  if (e.kind === 'notify') { // 조정 서비스 → 기다리던 브로커들
+    const ids = Object.keys(GEO.BOX).map(Number), st = electionState(replay.steps, replay.k, ids);
+    return moveDots(base, ids.filter(x => st.brokers[x].session).map(x => zkPath(x)), 'var(--ctrl)', true);
+  }
+  if (e.kind === 'session_expired' && has) { const [x, y] = brokerPt(b); return pulse(base, x - 20, y, 'var(--bad)'); }
+  const [x, y] = zkPt();
+  pulse(base, x - 30, y, e.kind === 'deleted' ? 'var(--warn)' : 'var(--ctrl)');
+}
+function moveDots(base, paths, color, back) {
+  const ov = document.getElementById('overlay');
+  ov.innerHTML = base + paths.map((d, i) => `<path id="rp${i}" d="${d}" fill="none" stroke="${color}" stroke-width="6" stroke-opacity=".3" stroke-dasharray="6 5"/><circle id="dot${i}" r="8" fill="${color}" stroke="#fff" stroke-width="2"/>`).join('');
+  const items = paths.map((d, i) => ({p: ov.querySelector('#rp' + i), dot: ov.querySelector('#dot' + i)})).map(x => ({...x, len: x.p.getTotalLength()}));
+  const t0 = performance.now(), dur = replay.stepMs * 0.8;
+  const tick = now => {
+    const t = Math.min(1, (now - t0) / dur), u = back ? 1 - t : t, ease = u < .5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+    items.forEach(x => { const pt = x.p.getPointAtLength(x.len * ease); x.dot.setAttribute('cx', pt.x); x.dot.setAttribute('cy', pt.y); });
+    if (t < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
 }
 
 // ------------------------------------------------------------------ 그림
@@ -394,10 +409,11 @@ function draw(s) {
   // ---- 가운데: 브로커 상자 안에 사본
   const PX = 600, PW = 340, HEADH = 50, RH = 32, TOPH = 20;
   const BOX = {}, ROW = {};
-  let y = 30;
+  const ZK = {x: PX - PW / 2, y: 30, w: PW, h: 104};
+  let y = ZK.y + ZK.h + 26;
   Object.keys(meta.brokers).map(Number).sort((a, b) => a - b).forEach(b => {
     const n = nodes.find(x => x.id === b) || {id: b};
-    const r = n.reachable ? n.raft : null, info = meta.brokers[b] || {};
+    const r = n.reachable ? n.coord : null, info = meta.brokers[b] || {};
     const sections = topics.map(t => ({t, parts: t.partitions.filter(p => p.replicas.includes(b))})).filter(x => x.parts.length);
     const h = HEADH + sections.reduce((a, x) => a + TOPH + x.parts.length * RH, 0) + 8;
     BOX[b] = {y, h};
@@ -412,7 +428,7 @@ function draw(s) {
     mid += `<g opacity="${n.reachable && !(r && r.isolated) ? 1 : 0.45}">
       <rect x="${PX - PW / 2}" y="${y}" width="${PW}" height="${h}" rx="12" fill="var(--card)" stroke="${C(b)}" stroke-width="${b === ctrl ? 3 : 1.6}"/>
       <text x="${PX - PW / 2 + 14}" y="${y + 21}" font-weight="700" font-size="14">broker-${b}${b === ctrl ? ' 👑 컨트롤러' : ''}</text>
-      <text x="${PX + PW / 2 - 12}" y="${y + 21}" text-anchor="end" font-size="11.5" fill="var(--muted)">${r ? `term ${r.term}` : ''}</text>
+      <text x="${PX + PW / 2 - 12}" y="${y + 21}" text-anchor="end" font-size="11.5" fill="var(--muted)">${r ? (r.session ? `세션 ${r.session}` : '<tspan fill="var(--bad)">세션 없음</tspan>') + (b === ctrl ? ` · epoch ${r.epoch}` : '') : ''}</text>
       <text x="${PX - PW / 2 + 14}" y="${y + 39}" font-size="11.5" fill="var(--muted)">${coords.length ? `그룹 코디네이터: ${coords.map(esc).join(', ')} ` : ''}${flags.map(([t, c]) => `<tspan fill="${c}" font-weight="700">${esc(t)} </tspan>`).join('')}</text>`;
     let ry = y + HEADH;
     sections.forEach(({t, parts}) => {
@@ -444,17 +460,31 @@ function draw(s) {
     y += h + 22;
   });
   const brokersH = y;
-  GEO = {PX, PW, BOX};
+  GEO = {PX, PW, BOX, ZK};
   const rowL = (key, b) => [PX - PW / 2 + 10, ROW[`${key}|${b}`]];
   const rowR = (key, b) => [PX + PW / 2 - 10, ROW[`${key}|${b}`]];
   const head = b => BOX[b] ? BOX[b].y + 22 : null;
 
-  // 박동: 컨트롤러 → 다른 브로커 (컨트롤, 왼쪽)
+  // ---- 조정 서비스 (ZooKeeper-lite) 상자와 브로커 세션 선
+  const zk = s.zk || {};
+  const zkNodes = {};
+  (zk.nodes || []).forEach(x => { zkNodes[x.path] = x; });
+  const zc = zkNodes['/controller'], zm = zkNodes['/metadata'];
+  const regs = Object.keys(zkNodes).filter(p => p.startsWith('/brokers/')).map(p => p.slice(9)).sort();
+  mid += `<g opacity="${zk.reachable === false ? 0.45 : 1}">
+    <rect x="${ZK.x}" y="${ZK.y}" width="${ZK.w}" height="${ZK.h}" rx="12" fill="var(--card)" stroke="var(--ctrl)" stroke-width="2"/>
+    <text x="${ZK.x + 14}" y="${ZK.y + 21}" font-weight="700" font-size="14">🗂 ZooKeeper-lite <tspan font-weight="400" font-size="11.5" fill="var(--muted)">조정 서비스 · 1대</tspan></text>
+    <text x="${ZK.x + ZK.w - 12}" y="${ZK.y + 21}" text-anchor="end" font-size="11" fill="var(--muted)">${zk.reachable === false ? '<tspan fill="var(--bad)">응답 없음</tspan>' : `zxid ${zk.zxid ?? '?'}`}</text>
+    <text x="${ZK.x + 14}" y="${ZK.y + 44}" font-size="12"><tspan font-weight="700">/controller</tspan> <tspan fill="var(--muted)">(임시 노드)</tspan> → ${zc ? `<tspan font-weight="700" fill="var(--accent)">broker-${esc(zc.data)}</tspan> <tspan fill="var(--muted)">epoch ${zc.czxid}</tspan>` : '<tspan fill="var(--warn)">비어 있음</tspan>'}</text>
+    <text x="${ZK.x + 14}" y="${ZK.y + 64}" font-size="12"><tspan font-weight="700">/brokers</tspan> <tspan fill="var(--muted)">(임시 노드 = 살아 있는 브로커)</tspan> → ${regs.length ? regs.map(r => `broker-${r}`).join(' · ') : '없음'}</text>
+    <text x="${ZK.x + 14}" y="${ZK.y + 84}" font-size="12"><tspan font-weight="700">/metadata</tspan> <tspan fill="var(--muted)">(지도: 토픽·사본·ISR)</tspan> → 버전 ${zm ? zm.version : '?'}</text></g>`;
+  const sessions = {};
+  (zk.sessions || []).forEach(x => { sessions[x.name] = x; });
   Object.keys(BOX).map(Number).forEach(b => {
-    if (b === ctrl || !BOX[ctrl] || !(nodes.find(x => x.id === b) || {}).reachable) return;
-    const x = PX - PW / 2, y1 = head(ctrl), y2 = head(b), bulge = 26 + Math.abs(y2 - y1) / 10;
-    back += `<path d="M${x},${y1} C${x - bulge},${y1} ${x - bulge},${y2} ${x},${y2}" fill="none" stroke="var(--ctrl)" stroke-width="1.6" stroke-dasharray="4 6" opacity=".55" ${anim(3)}>
-      <title>컨트롤러 broker-${ctrl} 의 박동: 메타데이터 v${meta.version} 를 복제한다</title></path>`;
+    const se = sessions['broker-' + b], ok = se && se.lastPingAgoMs < 1500;
+    const x1 = ZK.x + ZK.w, y1 = ZK.y + ZK.h / 2, x2 = PX + PW / 2, y2 = head(b), bulge = 40 + Math.abs(y2 - y1) / 12;
+    back += `<path d="M${x1},${y1} C${x1 + bulge},${y1} ${x2 + bulge},${y2} ${x2},${y2}" fill="none" stroke="${se ? 'var(--ctrl)' : 'var(--bad)'}" stroke-width="1.5"
+      stroke-dasharray="3 5" opacity="${se ? 0.7 : 0.5}" ${ok ? anim(2) : ''}><title>broker-${b} ↔ ZooKeeper-lite 세션 ${se ? `${se.id} (박동 ${(se.lastPingAgoMs / 1000).toFixed(1)}초 전)` : '없음'}</title></path>`;
   });
 
   // 복제: 리더 줄 → 팔로워 줄 (데이터, 오른쪽)
@@ -529,13 +559,13 @@ function draw(s) {
       back += `<path d="${d}" fill="none" stroke="${traced ? 'var(--data)' : partColor(pr.topic, p.partition)}" stroke-width="${traced ? 3.2 : width(rate)}"
         stroke-dasharray="8 6" opacity="${traced ? 1 : rate ? 0.85 : 0.3}" ${anim(rate)}><title>${pr.name} → ${key} 의 리더 broker-${p.leader}</title></path>`;
     });
-    // 지도: 컨트롤러 → 라우팅 (컨트롤)
-    if (BOX[ctrl]) {
-      const d = `M${PX - PW / 2},${head(ctrl) - 8} C${QX + 60},${head(ctrl) - 8} ${x0 + QW - 40},${routY - 30} ${x0 + QW - 40},${routY}`;
+    // 지도: 조정 서비스의 /metadata (컨트롤러가 씀) → 브로커가 들고 있다가 생산자에게 → 라우팅 (컨트롤)
+    {
+      const d = `M${ZK.x},${ZK.y + 84} C${QX + 80},${ZK.y + 84} ${x0 + QW - 40},${routY - 30} ${x0 + QW - 40},${routY}`;
       if (mineTopic) SEG.map = d;
       const traced = mineTopic && tr.has('map');
       back += `<path d="${d}" fill="none" stroke="var(--ctrl)" stroke-width="${traced ? 2.4 : 1.2}" stroke-dasharray="3 5" opacity="${traced ? 1 : 0.35}">
-        <title>지도(메타데이터): 컨트롤러 broker-${ctrl} 가 그리고 복제한다. 생산자는 아무 브로커에서 받아 캐시한다</title></path>`;
+        <title>지도 = 조정 서비스의 /metadata. 컨트롤러 broker-${ctrl} 만 고치고, 브로커들이 감시로 받아 생산자에게 준다</title></path>`;
     }
     qy += h + 24;
   });
@@ -623,10 +653,10 @@ function traceView(s, tr) {
   const body = document.getElementById('trace');
   if (replay.on && replay.mode === 'election') {
     const list = replay.steps, t0 = list.length ? list[0].at : 0, E = replay.election.E;
-    document.getElementById('trTitle').textContent = `👑 선거: term ${E.term} 에 broker-${E.node} 당선`;
+    document.getElementById('trTitle').textContent = `👑 컨트롤러 선출: broker-${E.node} 가 /controller 를 차지 (zxid ${E.term})`;
     body.innerHTML = list.map((e, i) => {
       const cls = i >= replay.k ? 'future' : i === replay.k - 1 ? 'cur' : '';
-      return `<tr class="${cls}"><td>+${e.at - t0}ms</td><td>${kindTag('ctrl')}${RAFT_ICON[e.kind] || '•'} <span class="dot" style="background:${C(e.node)}"></span> broker-${e.node}: ${esc(e.text)}</td></tr>`;
+      return `<tr class="${cls}"><td>+${e.at - t0}ms</td><td>${kindTag('ctrl')}${ZK_ICON[e.kind] || '•'} ${esc(e.text)}</td></tr>`;
     }).join('');
     return;
   }
@@ -668,8 +698,10 @@ function tables(s) {
     return `<tr><td>${esc(g.group)}</td><td>${esc(g.topic)}</td><td class="num">${e.reduce((a, [, v]) => a + (v || 0), 0)}</td>
       <td class="muted">${e.map(([p, v]) => `${p}:${v ?? '?'}`).join(' ')}</td></tr>`;
   }).join('');
-  const events = up.flatMap(n => n.raft.events)
-    .sort((a, b) => b.at - a.at || (a.node === b.node ? b.seq - a.seq : a.node - b.node)).slice(0, 16);
+  // 브로커 기록 + 조정 서비스 기록 (조정 서비스는 node 0, 회색)
+  const zkEv = ((s.zk || {}).events || []).filter(e => e.kind !== 'notify').map(e => ({...e, node: 0, text: '🗂 ' + e.text}));
+  const events = up.flatMap(n => n.coord.events).concat(zkEv)
+    .sort((a, b) => b.at - a.at || (a.node === b.node ? b.seq - a.seq : a.node - b.node)).slice(0, 18);
   document.getElementById('events').innerHTML = events.map(e =>
     `<tr><td>${time(e.at)}</td><td><span class="dot" style="background:${C(e.node)}"></span> ${esc(e.text)}</td></tr>`).join('');
 }

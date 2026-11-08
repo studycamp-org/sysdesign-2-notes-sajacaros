@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import study.minimq.broker.raft.RaftNode;
+import study.minimq.broker.zk.Coordination;
 import study.minimq.common.ClusterMetadata;
 import study.minimq.common.FetchResponse;
 import study.minimq.common.GroupProtocol;
@@ -26,13 +26,13 @@ public class BrokerApi {
     private final ReplicaManager replicas;
     private final OffsetStore offsets;
     private final Controller controller;
-    private final RaftNode raft;
+    private final Coordination coord;
     private final Traffic traffic;
     private final GroupCoordinator groups;
     private final Traces traces;
     private static final String CLIENT = "X-MiniMq-Client";
 
-    public BrokerApi(ReplicaManager replicas, OffsetStore offsets, Controller controller, RaftNode raft, Traffic traffic,
+    public BrokerApi(ReplicaManager replicas, OffsetStore offsets, Controller controller, Coordination coord, Traffic traffic,
                      GroupCoordinator groups, Traces traces) {
         this.traces = traces;
         this.traffic = traffic;
@@ -40,7 +40,7 @@ public class BrokerApi {
         this.replicas = replicas;
         this.offsets = offsets;
         this.controller = controller;
-        this.raft = raft;
+        this.coord = coord;
     }
 
     // ---------------------------------------------------------------- 메타데이터
@@ -59,7 +59,7 @@ public class BrokerApi {
     /** 생산자·소비자가 보는 "지도". 어느 브로커에 물어봐도 커밋된 메타데이터를 준다. */
     @GetMapping("/metadata")
     public ClusterMetadata metadata(@RequestHeader(value = CLIENT, required = false) String client) {
-        ClusterMetadata m = raft.committed();
+        ClusterMetadata m = coord.committed();
         traffic.record(client, "metadata", "", -1, 1, "v" + m.version());
         return m;
     }

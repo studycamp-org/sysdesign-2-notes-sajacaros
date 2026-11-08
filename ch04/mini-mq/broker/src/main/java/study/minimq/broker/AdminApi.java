@@ -17,14 +17,14 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 
-import study.minimq.broker.raft.RaftNode;
+import study.minimq.broker.zk.Coordination;
 import study.minimq.client.MiniMqHttp;
 
 /** 대시보드용. 고립 실험 중에도 열려 있다. */
 @RestController
 public class AdminApi {
     private final BrokerProperties props;
-    private final RaftNode raft;
+    private final Coordination coord;
     private final ReplicaManager replicas;
     private final OffsetStore offsets;
     private final Traffic traffic;
@@ -33,23 +33,23 @@ public class AdminApi {
     private final Controller controller;
     private final ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor();
 
-    public AdminApi(BrokerProperties props, RaftNode raft, ReplicaManager replicas, OffsetStore offsets, Traffic traffic,
+    public AdminApi(BrokerProperties props, Coordination coord, ReplicaManager replicas, OffsetStore offsets, Traffic traffic,
                     GroupCoordinator groups, Traces traces, Controller controller) {
         this.traces = traces;
         this.controller = controller;
         this.traffic = traffic;
         this.groups = groups;
         this.props = props;
-        this.raft = raft;
+        this.coord = coord;
         this.replicas = replicas;
         this.offsets = offsets;
     }
 
-    /** 이 브로커 하나의 상태: Raft 상태 + 가진 사본들 + 코디네이터로서 맡은 그룹 오프셋. */
+    /** 이 브로커 하나의 상태: 조정 서비스와의 관계(컨트롤러인가, 세션) + 가진 사본들 + 코디네이터로서 맡은 그룹 오프셋. */
     @GetMapping("/admin/node")
     public Map<String, Object> node() {
         Map<String, Object> out = new LinkedHashMap<>();
-        out.put("raft", raft.state());
+        out.put("coord", coord.state());
         out.put("replicationDelayMs", replicas.replicationDelayMs());
         out.put("replicas", replicas.states());
         out.put("offsets", offsets.all());
@@ -63,7 +63,7 @@ public class AdminApi {
     @GetMapping("/admin/cluster")
     public Map<String, Object> cluster() {
         Map<Integer, CompletableFuture<Map<String, Object>>> futures = new LinkedHashMap<>();
-        raft.members().forEach((id, url) -> futures.put(id, CompletableFuture.supplyAsync(() -> {
+        coord.members().forEach((id, url) -> futures.put(id, CompletableFuture.supplyAsync(() -> {
             if (id == props.brokerId()) return node();
             try {
                 return new MiniMqHttp(url).get("/admin/node", new TypeReference<Map<String, Object>>() {}, Duration.ofMillis(700));
@@ -95,14 +95,19 @@ public class AdminApi {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("servedBy", props.brokerId());
         out.put("producers", producers);
-        out.put("metadata", raft.committed());
+        try {
+            out.put("zk", coord.zkState());
+        } catch (IOException e) {
+            out.put("zk", Map.of("reachable", false));
+        }
+        out.put("metadata", coord.committed());
         out.put("nodes", nodes);
         return out;
     }
 
     @PostMapping("/admin/isolate")
     public Map<String, Object> isolate(@RequestParam boolean on) {
-        raft.setIsolated(on);
+        coord.setIsolated(on);
         return Map.of("id", props.brokerId(), "isolated", on);
     }
 
@@ -121,7 +126,7 @@ public class AdminApi {
     public Map<String, Object> crash(@RequestParam(defaultValue = "15") int downSec) throws IOException {
         java.nio.file.Files.writeString(java.nio.file.Path.of(props.dataDir()).resolve(BrokerApplication.DOWN_UNTIL),
                 Long.toString(System.currentTimeMillis() + downSec * 1000L));
-        raft.note("💥 강제 종료 (" + downSec + "초 동안 꺼져 있음)");
+        coord.note("💥 강제 종료 (" + downSec + "초 동안 꺼져 있음)");
         Thread.ofVirtual().start(() -> {
             try {
                 Thread.sleep(100);
@@ -180,7 +185,7 @@ public class AdminApi {
     @PostMapping("/admin/cluster/group-command")
     public Map<String, Object> groupCommandAll(@RequestParam String group, @RequestParam String member, @RequestParam String cmd) {
         boolean delivered = false;
-        for (String url : raft.members().values()) {
+        for (String url : coord.members().values()) {
             try {
                 String q = "/admin/group-command?group=%s&member=%s&cmd=%s".formatted(enc(group), enc(member), enc(cmd));
                 Map<?, ?> r = new MiniMqHttp(url).post(q, Map.of(), Map.class, Duration.ofSeconds(2));
@@ -205,7 +210,7 @@ public class AdminApi {
             case "crash" -> "/admin/crash";
             default -> throw new IllegalArgumentException(action);
         };
-        String url = raft.members().get(id);
+        String url = coord.members().get(id);
         return new MiniMqHttp(url).post(query, Map.of(), Map.class, Duration.ofSeconds(2));
     }
 }

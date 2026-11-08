@@ -12,7 +12,7 @@ import java.util.concurrent.Executors;
 
 import org.springframework.stereotype.Component;
 
-import study.minimq.broker.raft.RaftNode;
+import study.minimq.broker.zk.Coordination;
 import study.minimq.client.MiniMqHttp;
 
 /**
@@ -35,22 +35,22 @@ public class Traces {
     }
 
     private final BrokerProperties props;
-    private final RaftNode raft;
+    private final Coordination coord;
     private final Map<String, Trace> traces = new LinkedHashMap<>();
     private final List<Event> events = new ArrayList<>();
     private final Set<String> fired = new HashSet<>();
     private long seq;
     private final ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor();
 
-    public Traces(BrokerProperties props, RaftNode raft) {
+    public Traces(BrokerProperties props, Coordination coord) {
         this.props = props;
-        this.raft = raft;
+        this.coord = coord;
     }
 
     /** 이 브로커에서 추적을 시작하고 다른 브로커에도 알린다. */
     public void registerAndBroadcast(Trace t) {
         register(t);
-        raft.members().forEach((id, url) -> {
+        coord.members().forEach((id, url) -> {
             if (id == props.brokerId()) return;
             pool.submit(() -> {
                 try {

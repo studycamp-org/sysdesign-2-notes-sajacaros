@@ -1,3 +1,4 @@
 *
 !broker/build/libs/broker.jar
 !demo/build/libs/demo.jar
+!zookeeper/build/libs/zookeeper.jar

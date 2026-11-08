@@ -14,7 +14,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
 
-import study.minimq.broker.raft.RaftNode;
+import study.minimq.broker.zk.Coordination;
 import study.minimq.client.MiniMqHttp;
 import study.minimq.common.BrokerInfo;
 import study.minimq.common.ClusterMetadata;
@@ -24,7 +24,7 @@ import study.minimq.common.TopicMetadata;
 import study.minimq.common.Topics;
 
 /**
- * 컨트롤러가 하는 일 (정리.md 「컨트롤러 정리」). Raft 리더인 브로커에서만 실제로 동작한다.
+ * 컨트롤러가 하는 일 (정리.md 「컨트롤러 정리」). 조정 서비스(ZooKeeper-lite)의 /controller 를 차지한 브로커에서만 실제로 동작한다.
  * <ul>
  *   <li>사본 분산 계획: 토픽을 만들면 파티션마다 사본을 서로 다른 브로커에 둔다(리더도 고르게 퍼진다)</li>
  *   <li>서비스 탐색: 박동 응답이 끊긴 브로커를 죽음으로 표시한다</li>
@@ -35,11 +35,11 @@ import study.minimq.common.Topics;
  */
 @Component
 public class Controller {
-    private final RaftNode raft;
+    private final Coordination coord;
     private final BrokerProperties props;
 
-    public Controller(RaftNode raft, BrokerProperties props) {
-        this.raft = raft;
+    public Controller(Coordination coord, BrokerProperties props) {
+        this.coord = coord;
         this.props = props;
     }
 
@@ -50,16 +50,16 @@ public class Controller {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "토픽 이름은 영문·숫자·._- 만");
         }
         if (req.partitions() < 1) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "파티션은 1개 이상");
-        if (!raft.isLeader()) return forwardToController("/topics", req, TopicInfo.class);
+        if (!coord.isLeader()) return forwardToController("/topics", req, TopicInfo.class);
         return create(req);
     }
 
     private TopicInfo create(TopicInfo req) {
-        TopicMetadata existing = raft.accepted().topics().get(req.name());
+        TopicMetadata existing = coord.accepted().topics().get(req.name());
         if (existing != null) return info(existing);
-        TopicMetadata t = plan(req, raft.accepted());
-        await(raft.propose(m -> m.topics().containsKey(req.name()) ? m : m.withTopic(t)));
-        raft.note("토픽 " + req.name() + " 생성: 파티션 " + req.partitions() + "개 × 사본 " + t.replicationFactor()
+        TopicMetadata t = plan(req, coord.accepted());
+        await(coord.propose(m -> m.topics().containsKey(req.name()) ? m : m.withTopic(t)));
+        coord.note("토픽 " + req.name() + " 생성: 파티션 " + req.partitions() + "개 × 사본 " + t.replicationFactor()
                 + " (최소 ISR " + t.minInsyncReplicas() + ")");
         return info(t);
     }
@@ -86,11 +86,11 @@ public class Controller {
     // ------------------------------------------------------------------ ISR 변경 (파티션 리더가 요청)
 
     public void alterIsr(ReplicaManager.AlterIsr req) {
-        if (!raft.isLeader()) {
+        if (!coord.isLeader()) {
             forwardToController("/controller/alter-isr", req, Void.class);
             return;
         }
-        PartitionMetadata pm = raft.accepted().partition(req.topic(), req.partition())
+        PartitionMetadata pm = coord.accepted().partition(req.topic(), req.partition())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "없는 파티션"));
         if (pm.leader() != req.leaderId() || pm.leaderEpoch() != req.leaderEpoch()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "FENCED: 낡은 리더의 ISR 변경 요청");
@@ -100,11 +100,11 @@ public class Controller {
         }
         List<Integer> before = pm.isr();
         if (new java.util.TreeSet<>(before).equals(new java.util.TreeSet<>(req.isr()))) return; // 이미 그렇다
-        await(raft.propose(m -> m.partition(req.topic(), req.partition())
+        await(coord.propose(m -> m.partition(req.topic(), req.partition())
                 .filter(cur -> cur.leaderEpoch() == req.leaderEpoch())
                 .map(cur -> m.withPartition(req.topic(), cur.withIsr(req.isr())))
                 .orElse(m)));
-        raft.note(req.topic() + "-" + req.partition() + " ISR " + before + " → " + req.isr()
+        coord.note(req.topic() + "-" + req.partition() + " ISR " + before + " → " + req.isr()
                 + (req.isr().size() < before.size() ? " (뒤처진 사본 제외)" : " (따라잡은 사본 복귀)"));
     }
 
@@ -112,37 +112,43 @@ public class Controller {
 
     /** 클러스터 설정을 바꾼다. 메타데이터에 넣어 과반에 복제한다 (브로커가 재시작해도 남는다). */
     public void setSetting(String key, String value) {
-        if (!raft.isLeader()) {
+        if (!coord.isLeader()) {
             forwardToController("/admin/settings?key=" + java.net.URLEncoder.encode(key, java.nio.charset.StandardCharsets.UTF_8)
                     + "&value=" + java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8), Map.of(), Map.class);
             return;
         }
-        await(raft.propose(m -> m.withSetting(key, value)));
-        raft.note("설정 " + key + " = " + value);
+        await(coord.propose(m -> m.withSetting(key, value)));
+        coord.note("설정 " + key + " = " + value);
     }
 
     // ------------------------------------------------------------------ 생사 감시와 장애 복구
 
+    /**
+     * 서비스 탐색: 조정 서비스의 /brokers 임시 노드가 곧 살아 있는 브로커다(세션 박동이 끊기면 사라진다).
+     * 메타데이터의 생사와 다르면 고치고, 죽은 브로커가 리더였던 파티션은 리더를 옮긴다.
+     */
     @Scheduled(fixedDelay = 500)
     void checkLiveness() {
-        if (!raft.isLeader()) return;
-        ClusterMetadata m = raft.accepted();
-        if (!m.topics().containsKey(Topics.CONSUMER_OFFSETS) && m.controllerId() == props.brokerId()) {
-            // 기다리지 않는다: 스케줄 작업이 커밋을 기다리며 막히면 안 된다. 받은(accepted) 메타데이터에 들어가면 다음엔 건너뛴다
-            raft.propose(x -> x.topics().containsKey(Topics.CONSUMER_OFFSETS) ? x
+        if (!coord.isLeader()) return;
+        ClusterMetadata m = coord.accepted();
+        if (m.controllerId() != props.brokerId()) return; // 컨트롤러 기록이 메타데이터에 반영되기 전
+        if (!m.topics().containsKey(Topics.CONSUMER_OFFSETS)) {
+            // 기다리지 않는다: 스케줄 작업이 막히면 안 된다
+            coord.propose(x -> x.topics().containsKey(Topics.CONSUMER_OFFSETS) ? x
                     : x.withTopic(plan(new TopicInfo(Topics.CONSUMER_OFFSETS, Topics.CONSUMER_OFFSETS_PARTITIONS, 3, 2), x)));
             return;
         }
-        Map<Integer, Long> ages = raft.peerAckAges();
+        java.util.Set<Integer> live = coord.liveBrokers();
+        boolean grace = coord.controllerAgeMs() < 5000; // 막 컨트롤러가 됐을 땐 다른 브로커가 아직 등록 전일 수 있다
         for (BrokerInfo b : m.brokers().values()) {
-            boolean alive = b.id() == props.brokerId() || ages.getOrDefault(b.id(), Long.MAX_VALUE) <= props.brokerDeadMs();
-            if (alive == b.alive()) continue;
+            boolean alive = live.contains(b.id());
+            if (alive == b.alive() || (!alive && grace)) continue;
             if (alive) {
-                raft.note("broker-" + b.id() + " 응답 재개 → 살아남으로 표시");
-                raft.propose(x -> onBrokerAlive(x.withBrokerAlive(b.id(), true), b.id()));
+                coord.note("broker-" + b.id() + " 가 다시 등록됨(/brokers/" + b.id() + ") → 살아남으로 표시");
+                coord.propose(x -> x.brokers().get(b.id()).alive() ? x : onBrokerAlive(x.withBrokerAlive(b.id(), true), b.id()));
             } else {
-                raft.note("broker-" + b.id() + " 가 " + props.brokerDeadMs() + "ms 동안 응답 없음 → 죽음으로 표시, 리더 다시 뽑기");
-                raft.propose(x -> onBrokerDead(x.withBrokerAlive(b.id(), false), b.id()));
+                coord.note("broker-" + b.id() + " 의 임시 노드가 사라짐(세션 만료) → 죽음으로 표시, 리더 다시 뽑기");
+                coord.propose(x -> !x.brokers().get(b.id()).alive() ? x : onBrokerDead(x.withBrokerAlive(b.id(), false), b.id()));
             }
         }
     }
@@ -186,14 +192,14 @@ public class Controller {
     // ------------------------------------------------------------------ 도우미
 
     private <T> T forwardToController(String path, Object req, Class<T> type) {
-        String url = raft.leaderUrl();
+        String url = coord.leaderUrl();
         if (url == null) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "컨트롤러 선출 중");
         try {
             return new MiniMqHttp(url).post(path, req, type, Duration.ofSeconds(5));
         } catch (MiniMqHttp.HttpStatusException e) {
             throw new ResponseStatusException(HttpStatus.valueOf(e.status()), e.getMessage());
         } catch (IOException e) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "컨트롤러 broker-" + raft.leaderId() + " 에 전달 실패");
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "컨트롤러 broker-" + coord.leaderId() + " 에 전달 실패");
         }
     }
 

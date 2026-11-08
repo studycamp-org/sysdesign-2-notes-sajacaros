@@ -1,0 +1,11 @@
+// ZooKeeper-lite: 조정 서비스 (교재 그림 4.8, 4.22). 브로커 등록·컨트롤러 선출·메타데이터 저장
+apply plugin: 'org.springframework.boot'
+
+dependencies {
+    implementation project(':common')
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+}
+
+bootJar { archiveFileName = 'zookeeper.jar' }
+jar { enabled = false }

@@ -1,0 +1,16 @@
+server:
+  port: 8080
+  error:
+    include-message: always
+spring:
+  application:
+    name: zookeeper-lite
+  threads:
+    virtual:
+      enabled: true
+  mvc:
+    async:
+      request-timeout: 30s
+zk:
+  data-dir: ./data/zk
+  session-timeout-ms: 4000

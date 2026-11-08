@@ -1,4 +1,4 @@
-# 3단계: 브로커 3대 (Raft-lite 컨트롤러 + 파티션마다 사본 3개)
+# 브로커 3대 + 조정 서비스 ZooKeeper-lite 1대 (교재 그림 4.8·4.22: 브로커 등록·컨트롤러 선출·메타데이터)
 #   producer-logs   → logs   (ACK=1,   최소 ISR 1) → 소비자 그룹 search  × 3
 #   producer-orders → orders (ACK=all, 최소 ISR 2) → 소비자 그룹 payment × 4 (1명 놀기)
 #   생산자는 대시보드 버튼을 누를 때만 보낸다
@@ -9,18 +9,15 @@ x-broker: &broker
   build: { context: ., dockerfile: docker/Dockerfile, args: { MODULE: broker } }
   image: mini-mq-broker
   restart: unless-stopped
+  depends_on: [zookeeper]
 
 x-broker-env: &broker-env
+  MINIMQ_ZK_URL: http://zookeeper:8080     # 조정 서비스. 세션 박동이 4초 끊기면 그 브로커의 임시 노드가 지워진다
   MINIMQ_PEERS: "1=http://broker-1:8080,2=http://broker-2:8080,3=http://broker-3:8080"
   MINIMQ_DATA_DIR: /data
   MINIMQ_SEGMENT_BYTES: "262144"   # 256KB 마다 새 세그먼트 (금방 쌓이는 걸 보려고)
   MINIMQ_RETENTION_MS: "300000"    # 보관 5분 (교재는 2주)
-  MINIMQ_ELECTION_MIN_MS: "1500"   # 선거 타임아웃 1.5~3초 (눈으로 보려고 넉넉히)
-  MINIMQ_ELECTION_MAX_MS: "3000"
-  MINIMQ_HEARTBEAT_MS: "500"
-  MINIMQ_BROKER_DEAD_MS: "3000"
   MINIMQ_PRODUCERS: "producer-logs=http://producer-logs:8080,producer-orders=http://producer-orders:8080"
-  LOGGING_LEVEL_RAFT_RPC: ${RAFT_RPC_LOG:-INFO}   # RAFT_RPC_LOG=DEBUG ./run.sh 로 박동 송수신을 본다
   MINIMQ_REPLICA_LAG_TIME_MS: "4000"        # 4초 동안 안 가져가면 ISR 에서 뺀다
   MINIMQ_REPLICA_LAG_MAX_MESSAGES: "1000"   # 1000건 넘게 뒤처져도 뺀다
 
@@ -35,6 +32,18 @@ x-demo: &demo
 x-bootstrap: &bootstrap "http://broker-1:8080,http://broker-2:8080,http://broker-3:8080"
 
 services:
+  # 조정 서비스 (주키퍼 역할) 1대. 복제가 없어 이게 죽으면 컨트롤러 선출·메타데이터 변경이 멈춘다
+  zookeeper:
+    build: { context: ., dockerfile: docker/Dockerfile, args: { MODULE: zookeeper } }
+    image: mini-mq-zookeeper
+    restart: unless-stopped
+    environment:
+      ZK_DATA_DIR: /data
+      ZK_SESSION_TIMEOUT_MS: "4000"
+      JAVA_TOOL_OPTIONS: "-Xmx128m -XX:+UseSerialGC"
+    ports: ["8090:8080"]
+    volumes: [zookeeper:/data]
+
   broker-1:
     <<: *broker
     environment: { <<: *broker-env, MINIMQ_BROKER_ID: "1" }
@@ -113,6 +122,7 @@ services:
   # 소비자에 DEMO_CRASH_EVERY_SEC: "20" 을, 최대 한 번은 DEMO_COMMIT_MODE: before 를 넣는다
 
 volumes:
+  zookeeper:
   broker-1:
   broker-2:
   broker-3:

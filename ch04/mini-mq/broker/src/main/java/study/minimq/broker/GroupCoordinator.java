@@ -15,7 +15,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
 
-import study.minimq.broker.raft.RaftNode;
+import study.minimq.broker.zk.Coordination;
 import study.minimq.common.GroupProtocol.HeartbeatRequest;
 import study.minimq.common.GroupProtocol.HeartbeatResponse;
 import study.minimq.common.GroupProtocol.JoinRequest;
@@ -73,13 +73,13 @@ public class GroupCoordinator {
     }
 
     private final BrokerProperties props;
-    private final RaftNode raft;
+    private final Coordination coord;
     private final ReplicaManager replicas;
     private final Map<String, Group> groups = new ConcurrentHashMap<>();
 
-    public GroupCoordinator(BrokerProperties props, RaftNode raft, ReplicaManager replicas) {
+    public GroupCoordinator(BrokerProperties props, Coordination coord, ReplicaManager replicas) {
         this.props = props;
-        this.raft = raft;
+        this.coord = coord;
         this.replicas = replicas;
     }
 
@@ -130,7 +130,7 @@ public class GroupCoordinator {
             m.joined = false;
             if (m.sync != null && !m.sync.isDone()) m.sync.completeExceptionally(conflict("REBALANCE_IN_PROGRESS"));
         }
-        raft.note("👥 " + g.name + ": " + reason + " → 재조정 시작 (모두 다시 합류해야 함)");
+        coord.note("👥 " + g.name + ": " + reason + " → 재조정 시작 (모두 다시 합류해야 함)");
     }
 
     private void maybeCompleteJoin(Group g) {
@@ -145,7 +145,7 @@ public class GroupCoordinator {
             Member m = it.next();
             if (!m.joined) {
                 it.remove();
-                raft.note("👥 " + g.name + ": " + short_(m) + " 이 제때 다시 합류하지 않아 제외");
+                coord.note("👥 " + g.name + ": " + short_(m) + " 이 제때 다시 합류하지 않아 제외");
             }
         }
         if (g.members.isEmpty()) {
@@ -161,7 +161,7 @@ public class GroupCoordinator {
             m.assigned = List.of();
             m.join.complete(new JoinResponse(m.id, g.generation, g.leader, m.id.equals(g.leader) ? ids : List.of(), g.topic));
         }
-        raft.note("👥 " + g.name + ": 세대 " + g.generation + " 멤버 " + ids.size() + "명, 리더 소비자 "
+        coord.note("👥 " + g.name + ": 세대 " + g.generation + " 멤버 " + ids.size() + "명, 리더 소비자 "
                 + short_(g.members.get(g.leader)) + " → 배치 계획을 기다림");
     }
 
@@ -183,7 +183,7 @@ public class GroupCoordinator {
                 for (Member x : g.members.values()) {
                     if (x.sync != null && !x.sync.isDone()) x.sync.complete(new SyncResponse(g.generation, x.assigned));
                 }
-                raft.note("👥 " + g.name + ": 세대 " + g.generation + " 배정 " + plan + " → 소비 재개");
+                coord.note("👥 " + g.name + ": 세대 " + g.generation + " 배정 " + plan + " → 소비 재개");
             }
             if (g.state == State.STABLE) return CompletableFuture.completedFuture(new SyncResponse(g.generation, m.assigned));
             if (m.sync != null && !m.sync.isDone()) m.sync.completeExceptionally(conflict("REBALANCE_IN_PROGRESS"));
@@ -213,7 +213,7 @@ public class GroupCoordinator {
             if (m == null) return;
             if (g.members.isEmpty()) {
                 g.state = State.EMPTY;
-                raft.note("👥 " + g.name + ": " + short_(m) + " 나감 → 그룹이 비었음");
+                coord.note("👥 " + g.name + ": " + short_(m) + " 나감 → 그룹이 비었음");
             } else {
                 prepare(g, short_(m) + " 나감", props.rebalanceTimeoutMs());
                 maybeCompleteJoin(g);
@@ -240,7 +240,7 @@ public class GroupCoordinator {
                     g.members.remove(m.id);
                     if (g.members.isEmpty()) {
                         g.state = State.EMPTY;
-                        raft.note("👥 " + g.name + ": " + short_(m) + " 박동이 " + props.sessionTimeoutMs() / 1000 + "초 끊김 → 그룹이 비었음");
+                        coord.note("👥 " + g.name + ": " + short_(m) + " 박동이 " + props.sessionTimeoutMs() / 1000 + "초 끊김 → 그룹이 비었음");
                     } else {
                         prepare(g, short_(m) + " 박동이 " + props.sessionTimeoutMs() / 1000 + "초 끊김(장애)", props.rebalanceTimeoutMs());
                     }

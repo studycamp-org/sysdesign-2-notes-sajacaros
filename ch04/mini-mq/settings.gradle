@@ -1,2 +1,2 @@
 rootProject.name = 'mini-mq'
-include 'common', 'client', 'broker', 'demo'
+include 'common', 'client', 'broker', 'demo', 'zookeeper'

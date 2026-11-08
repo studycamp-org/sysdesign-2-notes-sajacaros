@@ -29,7 +29,7 @@ import org.springframework.web.server.ResponseStatusException;
 import com.fasterxml.jackson.core.type.TypeReference;
 
 import jakarta.annotation.PreDestroy;
-import study.minimq.broker.raft.RaftNode;
+import study.minimq.broker.zk.Coordination;
 import study.minimq.client.MiniMqHttp;
 import study.minimq.common.ClusterMetadata;
 import study.minimq.common.FetchResponse;
@@ -85,7 +85,7 @@ public class ReplicaManager {
     }
 
     private final BrokerProperties props;
-    private final RaftNode raft;
+    private final Coordination coord;
     private final Path dataDir;
     private final Map<String, Replica> replicas = new ConcurrentHashMap<>();
     private final ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor();
@@ -95,13 +95,13 @@ public class ReplicaManager {
     private volatile long replicationDelayMs; // 실험용: 팔로워가 가져가기 전에 쉬는 시간
     private final Traces traces;
 
-    public ReplicaManager(BrokerProperties props, RaftNode raft, Traces traces) {
+    public ReplicaManager(BrokerProperties props, Coordination coord, Traces traces) {
         this.props = props;
-        this.raft = raft;
+        this.coord = coord;
         this.traces = traces;
         this.dataDir = Path.of(props.dataDir());
-        this.meta = raft.committed();
-        raft.addListener(this::onMetadata);
+        this.meta = coord.committed();
+        coord.addListener(this::onMetadata);
     }
 
     /** 이 브로커가 어떤 파티션의 리더가 될 때 불린다 (오프셋 저장소가 자기 상태를 다시 읽는 데 쓴다). */
@@ -138,7 +138,7 @@ public class ReplicaManager {
             // 팔로워 위치는 아직 모른다. 첫 요청이 올 때까지 HW 를 올리지 않고, ISR 에서도 바로 빼지 않는다
             r.followers.clear();
             r.leaderSinceMs = System.currentTimeMillis();
-            raft.note(r.name() + " 의 리더가 됨 (leader epoch " + pm.leaderEpoch() + ", LEO " + r.log.logEndOffset() + ")");
+            coord.note(r.name() + " 의 리더가 됨 (leader epoch " + pm.leaderEpoch() + ", LEO " + r.log.logEndOffset() + ")");
             maybeAdvanceHighWatermark(r);
             leaderListeners.forEach(l -> l.accept(r.topic, r.partition));
         } else {
@@ -158,7 +158,7 @@ public class ReplicaManager {
         boolean needTruncate = true;
         while (r.roleEpoch == epoch && !Thread.currentThread().isInterrupted()) {
             try {
-                if (raft.isolated()) {
+                if (coord.isolated()) {
                     Thread.sleep(200);
                     continue;
                 }
@@ -195,7 +195,7 @@ public class ReplicaManager {
                 new TypeReference<Long>() {}, Duration.ofSeconds(2));
         if (end < myEnd) {
             r.log.truncateTo(end);
-            raft.note("✂ " + r.name() + " 꼬리 " + (myEnd - end) + "건 잘라냄 (LEO " + myEnd + " → " + end
+            coord.note("✂ " + r.name() + " 꼬리 " + (myEnd - end) + "건 잘라냄 (LEO " + myEnd + " → " + end
                     + ", 새 리더 broker-" + leaderId + " 에 없는 메시지)");
         }
     }
@@ -351,8 +351,8 @@ public class ReplicaManager {
     }
 
     private void requestIsrChange(Replica r, PartitionMetadata pm, List<Integer> isr) {
-        String controller = raft.leaderUrl();
-        if (controller == null || raft.isolated()) return;
+        String controller = coord.leaderUrl();
+        if (controller == null || coord.isolated()) return;
         r.isrChangeInFlight = true;
         pool.submit(() -> {
             try {
@@ -382,7 +382,7 @@ public class ReplicaManager {
 
     public void setReplicationDelayMs(long ms) {
         replicationDelayMs = ms;
-        raft.note(ms > 0 ? "🐢 복제 지연 시작: 팔로워가 가져가기 전에 " + ms + "ms 쉰다" : "복제 지연 해제");
+        coord.note(ms > 0 ? "🐢 복제 지연 시작: 팔로워가 가져가기 전에 " + ms + "ms 쉰다" : "복제 지연 해제");
     }
 
     public long replicationDelayMs() {

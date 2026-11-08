@@ -1,14 +1,14 @@
 # mini-mq — 4장 분산 메시지 큐를 직접 만들어 보기
 
 `ch04/정리.md` 의 설계를 Spring Boot로 작게 구현한다. 성능이 아니라 **동작을 눈으로 보는 것**이 목적이다.
-주키퍼 없이, 브로커끼리 컨트롤러를 직접 뽑는다(KRaft combined 모드와 같은 모양).
+교재처럼 **조정 서비스(ZooKeeper-lite, 주키퍼 역할) 1대**가 브로커 등록·컨트롤러 선출·메타데이터를 맡는다.
 
 ## 단계
 
 | 단계 | 내용 | 정리.md / 교재 그림 | 상태 |
 |---|---|---|---|
 | 1 | 세그먼트 로그 저장소, 생산자 버퍼·일괄 전송, 풀 + 롱 폴링 소비자, 오프셋 커밋 | 그림 4.9~4.14, 4.21, 4.32~4.33 | ✅ |
-| 2 | 컨트롤러 선출 (Raft-lite: term·과반 투표·메타데이터 스냅샷 복제·epoch 펜싱), 파티션 배정, 클라이언트 라우팅 | 그림 4.8, 4.11~4.12, 4.22 자리 | ✅ |
+| 2 | 조정 서비스 ZooKeeper-lite: 세션·임시 노드로 브로커 등록, /controller 를 먼저 만든 브로커가 컨트롤러, /metadata, 파티션 배정, 클라이언트 라우팅 | 그림 4.8, 4.11~4.12, 4.22 | ✅ |
 | 3 | 복제: 리더/팔로워, ISR, 합의 오프셋(HW), ACK=1/all, 최소 ISR, 장애 복구, 꼬리 잘라내기, 오프셋도 복제(`__consumer_offsets`) | 그림 4.23~4.28 | ✅ |
 | 4 | 소비자 그룹 코디네이터, 재조정(합류·나가기·장애), 리더 소비자의 배치 계획, 세대 펜싱 | 그림 4.15~4.20 | ✅ |
 
@@ -21,14 +21,13 @@
 open http://localhost:8081    # 대시보드 (8082, 8083 도 같은 화면)
 docker compose logs -f producer-logs producer-orders consumer-logs consumer-orders
 docker compose down -v        # 끝. -v 는 브로커 데이터까지 지운다
-RAFT_RPC_LOG=DEBUG ./run.sh   # Raft 박동 송수신까지 로그로 보기
 ```
 
 ## 대시보드
 
 http://localhost:8081 (8082, 8083 도 같은 화면). 위에서 아래로:
 
-- **컨트롤 플레인**: 브로커 3대. 👑 = 컨트롤러(Raft 리더), 금색 점선 = 박동 + 메타데이터 복제
+- **조정 서비스**: 가운데 위 ZooKeeper-lite 상자(/controller · /brokers · /metadata), 브로커마다 세션 박동 선. 👑 = /controller 를 차지한 브로커
 - **데이터 플레인**: 생산자(버퍼 → 라우팅) → 브로커 상자 안 사본 → 소비자 그룹
   - 파티션 왼쪽 띠 색 = 리더 브로커, 사본 칸 = ★ 리더 / 꽉 참 ISR / 점선 ISR 밖, 칸 위 화살표 = 복제(주황 뒤처짐, 빨강 ISR 밖)
 - **보라 점선** = 클라이언트가 지도(메타데이터)를 받아 감 = 라우팅. 평소엔 없고 장애 직후에 나타난다
@@ -117,7 +116,7 @@ producer-orders ─▶ orders 3 파티션 × 사본 3, ACK=all, 최소 ISR 2 ─
 
 ### 만들면서 잡은 버그 (교훈)
 
-- **빈 클러스터 기동 때 컨트롤러가 2초마다 바뀌었다 (term 64).** Raft 시계용 `ScheduledExecutorService` 를 스프링 빈으로 등록했더니
+- (Raft-lite 시절) **빈 클러스터 기동 때 컨트롤러가 2초마다 바뀌었다 (term 64).** Raft 시계용 `ScheduledExecutorService` 를 스프링 빈으로 등록했더니
   스프링이 그걸 `@Scheduled` 공용 스케줄러로 썼다. 새 컨트롤러가 `__consumer_offsets` 를 만들며 커밋을 3초 기다리는 동안 같은 스레드의
   박동이 멈춰 팔로워가 다시 선거 → 새 컨트롤러가 또 기다림. 스레드 덤프로 찾았다. Raft 시계는 전용 스레드로, 스케줄 작업은 기다리지 않게 고쳤다.
 - **일시적인 연결 오류에 소비자가 그룹에서 나갔다**(나갔다 들어오느라 재조정 2번). 오류에는 멤버십을 유지한 채 다시 시도하게 고쳤다.
@@ -161,51 +160,45 @@ producer-orders ─▶ orders 3 파티션 × 사본 3, ACK=all, 최소 ISR 2 ─
 - HW 를 디스크에 남기지 않는다. 재시작한 리더는 팔로워가 한 번씩 올 때까지 HW 를 올리지 않는다
 - ISR 이 모두 죽으면 깨끗한 리더 선출만 한다(ISR 밖 사본을 리더로 올리는 unclean 선출 없음 = 가용성보다 영속성)
 
-## 2단계: 주키퍼 없이 컨트롤러 뽑기 (Raft-lite)
+## 2단계: 조정 서비스 ZooKeeper-lite (그림 4.8, 4.22)
 
 ```
-             ┌──────── Raft-lite: 투표 · 박동 · 메타데이터 스냅샷 복제 ────────┐
-             ▼                                ▼                               ▼
-         broker-1                         broker-2 👑 컨트롤러               broker-3
-     logs-0, logs-3                     logs-1, logs-4                   logs-2, logs-5
-             ▲                                ▲                               ▲
-             └──── 생산자·소비자: 아무 브로커에서 /metadata(지도)를 받아 파티션 리더로 직접 ────┘
+                 🗂 ZooKeeper-lite (1대)
+                 /controller  = 2        ← 임시 노드. 먼저 만든 브로커가 컨트롤러
+                 /brokers/1·2·3          ← 임시 노드. 세션 박동이 끊기면 사라짐 = 서비스 탐색
+                 /metadata (버전)         ← 지도: 토픽·사본·ISR. 컨트롤러만 고친다
+            ┌─── 세션 박동 1초 · 감시(watch) ───┐
+        broker-1        broker-2 👑         broker-3
 ```
 
-교재는 조정 서비스(주키퍼)가 브로커 중 하나를 컨트롤러로 뽑는다. 여기서는 브로커 3대가 **서로 투표해서** 뽑는다.
-카프카가 주키퍼를 걷어낸 KRaft(combined 모드)와 같은 모양이다.
-
-| 정리.md 의 역할 | 누가 | 코드 |
+| 교재 | 여기서 | 코드 |
 |---|---|---|
-| 리더 선출 (조정 서비스) | 브로커 3대가 Raft-lite 로 | `raft/RaftNode` |
-| 메타데이터 저장소 | 과반이 받은 스냅샷 (`raft.json`) | `ClusterMetadata`, `FileRaftStorage` |
-| 서비스 탐색 | 컨트롤러가 박동 응답으로 판단, 3초 끊기면 죽음 표시 | `Controller.checkLiveness` |
-| 파티션 배정 | 컨트롤러가 살아 있는 브로커에 라운드 로빈 | `Controller.createTopic` |
-| 라우팅 (지도를 보고 찾아가기) | 생산자·소비자 라이브러리 | `client/ClusterView` |
+| 조정 서비스 (주키퍼·etcd) | ZooKeeper-lite 1대. 노드 나무 + 세션 + 임시 노드 + 버전 비교(CAS) + 감시 | `zookeeper/ZkStore` |
+| 서비스 탐색: 살아 있는 브로커 | 브로커가 세션을 열고 1초마다 박동, 임시 노드 `/brokers/{id}`. 4초 끊기면 세션 만료 → 노드 삭제 | `broker/zk/Coordination` |
+| 리더 선출: 브로커 중 하나가 컨트롤러 | `/controller` 가 비면(감시 알림) 모두 임시 노드로 만들어 보고, 먼저 만든 브로커가 컨트롤러. 노드가 만들어진 순번(czxid) = 컨트롤러 epoch | `Coordination.tryBecomeController` |
+| 메타데이터 저장소 | `/metadata`. 컨트롤러가 "그 버전일 때만, 그리고 /controller 가 아직 나일 때만" 고친다 → 낡은 컨트롤러의 쓰기는 거절(CHECK_FAILED) | `Coordination.propose` |
+| 컨트롤러 → 브로커 | 브로커들은 감시로 `/metadata` 가 바뀐 걸 알고 다시 읽어 자기 역할(리더·팔로워)을 바꾼다 | `ReplicaManager.onMetadata` |
 
-Raft-lite 가 Raft 에서 가져온 것: term, 무작위 선거 타임아웃, 과반 투표, 한 term 에 한 표(디스크에 남긴 뒤 응답),
-**선출 제한**(메타데이터가 뒤처진 후보에게는 표를 안 준다), **자기 term 의 항목만 세어 커밋**.
-단순화한 것: 로그 대신 메타데이터 스냅샷 전체를 보낸다, 멤버십 고정, PreVote 없음.
+브로커끼리는 투표하지 않는다. **조정 서비스가 1대라 단일 장애점**이다: 죽으면 컨트롤러 선출·메타데이터 변경이 멈춘다
+(브로커는 들고 있는 메타데이터로 계속 읽고 쓴다). 진짜 주키퍼는 3·5대가 ZAB 로 복제한다.
 
-### 대시보드에서 해 볼 실험
+### 실제로 본 것: 컨트롤러 강제 종료
 
-맨 위 **고립** 버튼은 그 브로커를 네트워크에서 떼어 낸 것처럼 만든다 (Raft·생산·소비 요청을 503 으로 막고, 밖으로도 못 보냄).
-진짜로 죽이려면 `docker compose stop broker-2` / `start broker-2`.
+```
+     +0ms  💀 broker-2 세션 만료 (박동이 4초 넘게 없었다)
+     +0ms  🗑 /brokers/2 삭제, /controller 삭제
+     +1ms  🔔 감시 알림 → 기다리던 브로커 2곳
+    +14ms  👑 broker-3 가 /controller 생성 (czxid 13 = 새 epoch)
+    +14ms  ✋ broker-1 도 만들려 했지만 이미 있다
+    +44ms  📜 broker-3 가 /metadata 에 "컨트롤러 = 나" (버전 5)
+   +344ms  📜 broker-2 를 죽음으로 표시하고 그 리더 파티션을 ISR 에서 옮김 (버전 6~)
+```
 
-| 실험 | 실제로 본 것 |
-|---|---|
-| 첫 기동 | broker-2·3 이 term 1 에 동시 출마(표 갈림). broker-1 의 표를 먼저 받은 broker-2 가 2/3 로 당선. broker-3 은 "이미 나에게 투표함"으로 거절 |
-| **리더 고립** | 1.5~3초 뒤 broker-3 이 term 2 로 당선. 고립된 broker-2 는 여전히 term 1 리더라고 믿고 다른 둘을 "죽음"으로 바꾸려 했지만 **커밋 못 함**(받기만 한 v4, 커밋 v2). 새 컨트롤러는 broker-2 를 죽음으로 커밋(v4). 같은 v4 인데 내용이 다르다 |
-| 리더 고립 중 클라이언트 | broker-2 가 리더인 파티션 1·4 만 멈춤(`리더없음=[1, 4]`), 나머지는 계속. 생산자 재시도가 바닥난 15건 = 소비자 `gap=15` |
-| **고립 해제 (펜싱)** | 돌아온 broker-2 의 term 1 박동을 둘이 "낡은 term" 으로 거부 → broker-2 는 응답의 term 2 를 보고 내려옴, 자기의 커밋 안 된 v4 를 버리고 새 리더의 v4 를 받음 |
-| **팔로워 고립 10초** | 혼자 선거를 반복해 term 6 까지 올림 → 돌아오자 멀쩡한 리더가 그 term 을 보고 **내려옴**. 그러나 broker-1 은 메타데이터가 뒤처져(v5 < v6) 표를 못 받고, term 7 에 broker-2 가 당선. 쓸데없는 리더 교체 = PreVote 가 막는 문제 |
-| 리더 컨테이너 정지 | 남은 둘 중 하나가 term 10 으로 당선, 3초 뒤 죽은 브로커 표시. 다시 켜면 팔로워로 합류. 재배포해도 term 이 이어진다(`raft.json`) |
+대시보드의 **👑 컨트롤러 선출 · 천천히 보기**로 이 순서를 단계별로 다시 볼 수 있다 (조정 서비스 기록으로 재생,
+브로커 ↔ 조정 서비스 사이로 점이 오가고, 만들기 성공은 초록·실패는 빨강).
 
-### 2단계의 한계
-
-- (3단계에서 풂) 사본이 하나뿐이라 리더 브로커가 죽으면 그 파티션이 멈췄다. 오프셋도 리더 로컬 파일이었다.
-- PreVote 가 없어 고립됐다 돌아온 노드가 리더를 끌어내린다. 일부러 남겨 뒀다(눈에 보이게). 넣는다면: 출마 전에 "지금 리더 박동이 끊겼는지"를 과반에게 먼저 물어본다.
-- 커밋 전에 리더 자리를 잃으면 요청한 쪽은 실패를 받지만, 실제로는 나중에 커밋될 수도 있다(결과 미상). Raft 의 원래 성질이다.
+> 처음엔 Raft-lite(브로커 3대가 서로 투표, 카프카 KRaft 방식)로 만들었다가 교재 구조에 맞춰 바꿨다.
+> 그 코드와 실험 기록은 git 이력(`f558a56` 2단계 커밋)에 있다.
 
 ## 1단계: 로그 저장소와 전달 보장
 
@@ -254,10 +247,9 @@ producer ──(서버 ID 키, 버퍼에 모아 일괄 전송)──▶ 파티�
 | `MINIMQ_SEGMENT_BYTES` | 1MB | 세그먼트 크기 |
 | `MINIMQ_RETENTION_MS` | 2주 | 보관 기간 |
 | `MINIMQ_FLUSH_EVERY_WRITE` | false | true 면 쓸 때마다 fsync. false 면 OS 페이지 캐시에 맡긴다 |
-| `MINIMQ_PEERS` | — | 클러스터 구성원 `1=http://broker-1:8080,...` (나 포함) |
-| `MINIMQ_ELECTION_MIN_MS` / `MAX_MS` | 1500 / 3000 | 선거 타임아웃 범위. 노드마다 무작위 |
-| `MINIMQ_HEARTBEAT_MS` | 500 | 컨트롤러 박동 주기 |
-| `MINIMQ_BROKER_DEAD_MS` | 3000 | 이 시간 응답이 없으면 컨트롤러가 죽음으로 표시 |
+| `MINIMQ_PEERS` | — | 브로커 목록 `1=http://broker-1:8080,...` (나 포함) |
+| `MINIMQ_ZK_URL` | http://localhost:8090 | 조정 서비스(ZooKeeper-lite) 주소 |
+| `ZK_SESSION_TIMEOUT_MS` | 4000 | (조정 서비스) 세션 박동이 이 시간 끊기면 세션 만료 → 임시 노드 삭제 |
 | `MINIMQ_REPLICA_LAG_TIME_MS` / `LAG_MAX_MESSAGES` | 4000 / 1000 | 이 시간 안 오거나 이만큼 뒤처지면 ISR 에서 뺀다 |
 | `MINIMQ_ACK_TIMEOUT_MS` | 5000 | ACK=all 이 ISR 전원을 기다리는 최대 시간 |
 | `DEMO_NAME` / `DEMO_TOPIC` | server / logs | 생산자 이름(producer-이름) / 보낼 토픽 |
@@ -277,7 +269,8 @@ producer ──(서버 ID 키, 버퍼에 모아 일괄 전송)──▶ 파티�
 |---|---|
 | `common` | 메시지 자료 구조(표 4.1), 요청·응답, CRC, 파티셔너 |
 | `client` | 생산자·소비자(그룹 합류·배치 계획·박동) 라이브러리 + `ClusterView`(지도). 스프링 없이 `java.net.http` 만 쓴다 |
-| `broker` | Spring Boot. `LogSegment`(WAL 파일 하나) → `PartitionLog`(세그먼트 나열, HW, epoch 캐시) → `ReplicaManager`(리더·팔로워, ISR) + `OffsetStore` + `GroupCoordinator` + `raft/`(선출·메타데이터 복제) + `Controller` + `Traffic`·대시보드 |
+| `zookeeper` | ZooKeeper-lite: 노드 나무·세션·임시 노드·CAS·감시. 영구 노드만 파일에 남긴다 |
+| `broker` | Spring Boot. `LogSegment`(WAL 파일 하나) → `PartitionLog`(세그먼트 나열, HW, epoch 캐시) → `ReplicaManager`(리더·팔로워, ISR) + `OffsetStore` + `GroupCoordinator` + `zk/Coordination`(조정 서비스와 세션·선출·메타데이터) + `Controller` + `Traffic`·대시보드 |
 | `demo` | 생산자·소비자 데모 앱 (`DEMO_ROLE` 로 고른다) |
 
 ## 일부러 단순하게 한 것
