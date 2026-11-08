@@ -51,6 +51,14 @@
   .trace td { font-size: 13px; padding: 3px 8px; vertical-align: top; }
   .trace td:first-child { white-space: nowrap; color: var(--muted); width: 1%; text-align: right; font-variant-numeric: tabular-nums; }
   .trace .wait td { color: var(--muted); font-style: italic; }
+  .flowwrap { position: relative; }
+  #overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  #banner { background: var(--card); border: 2px solid; border-radius: 8px; margin: 2px 0 6px;
+            padding: 5px 10px; font-size: 13px; line-height: 1.45; display: none; }
+  .kind { font-size: 11px; font-weight: 700; padding: 0 6px; border-radius: 8px; color: #fff; margin-right: 4px; white-space: nowrap; }
+  .trace tr.future { opacity: .3; }
+  .trace tr.cur td { font-weight: 700; }
+  .tctl { display: inline-flex; gap: 6px; margin-left: 10px; vertical-align: middle; font-weight: 400; }
   .two { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   @media (max-width: 900px) { .two { grid-template-columns: 1fr; } }
 </style>
@@ -71,21 +79,36 @@
       <select id="tAcks" title="acks"><option value="1">acks=1</option><option value="all">acks=all</option><option value="0">acks=0</option></select>
       <button class="send" onclick="sendOne()">보내기</button>
       <span class="muted" id="tMsg"></span>
+      <span class="sep"></span>
+      <label title="흐르는 점선의 속도. 실제 처리 속도는 그대로">흐름 애니메이션 <select id="speed" onchange="SPEED = Number(this.value)">
+        <option value="1">1×</option><option value="0.5">½×</option><option value="0.25">¼×</option></select></label>
     </div>
-    <svg id="flow" viewBox="0 0 1100 600" role="img" aria-label="생산자에서 소비자까지의 흐름과 컨트롤러"></svg>
+    <div id="banner"></div>
+    <div class="flowwrap">
+      <svg id="flow" viewBox="0 0 1100 600" role="img" aria-label="생산자에서 소비자까지의 흐름과 컨트롤러"></svg>
+      <svg id="overlay" viewBox="0 0 1100 600" aria-hidden="true"></svg>
+    </div>
     <div class="legend">
       <span><i style="border-color:var(--data)"></i>메시지 (굵기 = 초당 건수)</span>
       <span><i style="border-color:var(--beat);border-top-style:dashed"></i>컨트롤러 박동 + 메타데이터 복제</span>
       <span><i style="border-color:var(--route);border-top-style:dotted"></i>지도(메타데이터) 받기 = 라우팅</span>
       <span><i style="border-color:var(--commit);border-top-style:dotted"></i>그룹 → 코디네이터 브로커 (박동·합류·커밋)</span>
-      <span><i style="border-color:#c99a1e"></i>📨 한 건의 경로 · <b style="color:#c99a1e">⋯</b> 지도를 그린 컨트롤러</span>
+      <span>📨 한 건: <i style="border-color:#c99a1e"></i>데이터 (메시지가 움직임) · <i style="border-color:#1f8fa3;border-top-style:dashed"></i>컨트롤 (지도·HW·ACK·커밋)</span>
       <span>사본 칸: <b>꽉 참</b> ISR · <b>점선</b> ISR 밖 · ★ 리더 · 칸 위 화살표 = 복제 (주황 뒤처짐 · 빨강 ISR 밖)</span>
     </div>
   </section>
 
   <div class="two">
     <section>
-      <h2>📨 한 건의 여정 <span class="muted" id="trTitle"></span></h2>
+      <h2>📨 한 건의 여정 <span class="muted" id="trTitle"></span>
+        <span class="tctl">
+          <button onclick="startReplay()" title="기록된 단계를 처음부터 천천히 다시 보여 준다">▶ 천천히 재생</button>
+          <button onclick="pauseReplay()">⏸</button>
+          <button onclick="nextStep()" title="한 단계씩">⏭ 다음</button>
+          <button onclick="stopReplay()" title="재생을 그만두고 전부 보기">■</button>
+          <select id="stepMs" onchange="replay.stepMs = Number(this.value)" title="단계 사이 간격">
+            <option value="2600">느리게</option><option value="1600" selected>보통</option><option value="800">빠르게</option></select>
+        </span></h2>
       <div class="card"><table class="trace"><tbody id="trace"><tr class="wait"><td></td><td>위의 "보내기"를 누르면 메시지 하나가 지나가는 단계가 여기 나온다. 자동 생산을 끄면 그림에서도 그 한 건만 보인다.</td></tr></tbody></table></div>
       <h2 style="margin-top:14px">이벤트</h2>
       <div class="card"><table class="events"><tbody id="events"></tbody></table></div>
@@ -111,11 +134,20 @@ const width = r => 1.2 + 2.4 * Math.log10(1 + r);
 // 다시 그려도 애니메이션이 끊기지 않게 시계 기준으로 위상을 맞춘다
 const anim = (r) => {
   if (!r) return '';
-  const dur = Math.max(0.35, 2.4 - 0.75 * Math.log10(1 + r));
+  const dur = Math.max(0.35, 2.4 - 0.75 * Math.log10(1 + r)) / SPEED;
   return `class="anim" style="animation-duration:${dur}s;animation-delay:-${(Date.now() / 1000) % dur}s"`;
 };
 const curve = (x1, y1, x2, y2) => { const dx = (x2 - x1) * 0.5; return `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`; };
 
+const TRACE_COLOR = {data: '#c99a1e', ctrl: '#1f8fa3'};
+// 데이터 = 메시지 자체가 움직이는 단계, 컨트롤 = 메시지에 관한 정보(지도·HW)나 응답(ACK)·오프셋이 오가는 단계
+const STEP_KIND = {map: 'ctrl', routed: 'data', stored: 'data', replicated: 'data', hw: 'ctrl', acked: 'ctrl', fetched: 'data', committed: 'ctrl', failed: 'ctrl'};
+const STEP_ICON = {map: '🗺', routed: '🧭', stored: '💾', replicated: '📋', hw: '✅', acked: '📬', fetched: '📥', committed: '📌', failed: '❌'};
+const kindTag = k => `<span class="kind" style="background:${TRACE_COLOR[k]}">${k === 'data' ? '데이터' : '컨트롤'}</span>`;
+let SPEED = 1;            // 흐름 애니메이션 배속
+let SEG = {};             // 마지막으로 그린 한 건의 경로 좌표 (재생용)
+let lastState = null;
+const replay = {on: false, k: 0, playing: false, timer: null, stepMs: 1600};
 let currentTrace = new URLSearchParams(location.search).get('trace'); // ?trace=trace-xxxx 로 특정 한 건을 열 수 있다
 
 async function toggleAuto() {
@@ -136,7 +168,10 @@ async function sendOne() {
     currentTrace = r.id;
     msg.textContent = r.error ? `실패: ${r.error}` : `${r.id} → ${topic}-${r.partition} offset ${r.offset}`;
   } catch (e) { msg.textContent = '실패'; }
-  refresh();
+  stopReplay();
+  await refresh();
+  setTimeout(startReplay, 600); // 기록이 모이는 대로 천천히 보여 준다
+
 }
 
 function flowbar(meta) {
@@ -163,21 +198,102 @@ function traceOf(s) {
     .sort((a, b) => a.at - b.at || (a.broker === b.broker ? a.seq - b.seq : 0));
   const seen = new Set();
   const uniq = events.filter(e => { const k = e.step + '|' + e.who; if (seen.has(k)) return false; seen.add(k); return true; });
-  return {id: currentTrace, t, events: uniq,
+  const done = uniq.some(e => e.step === 'committed' || e.step === 'failed') || (uniq.length && Date.now() - uniq[0].at > 15000);
+  return {id: currentTrace, t, events: uniq, all: uniq, done,
     key: t ? `${t.topic}-${t.partition}` : null,
     has: (step, who) => uniq.some(e => e.step === step && (who === undefined || e.who === who))};
+}
+
+/** 재생 중이면 지금 단계까지만 보이게 한다. */
+function visibleTrace(tr) {
+  if (!tr || !replay.on) return tr;
+  const ev = tr.all.slice(0, replay.k);
+  return {...tr, events: ev, has: (step, who) => ev.some(e => e.step === step && (who === undefined || e.who === who))};
+}
+
+// ---------------- 천천히 재생: 기록된 단계를 하나씩, 점을 경로 위로 움직이며
+function startReplay() {
+  if (!lastState || !traceOf(lastState)) return;
+  pauseReplay();
+  replay.on = true; replay.k = 0; replay.playing = true;
+  stepNext();
+}
+function pauseReplay() { replay.playing = false; clearTimeout(replay.timer); }
+function nextStep() {
+  pauseReplay();
+  if (!replay.on) { replay.on = true; replay.k = 0; }
+  stepNext(true);
+}
+function stopReplay() {
+  pauseReplay(); replay.on = false;
+  document.getElementById('overlay').innerHTML = '';
+  document.getElementById('banner').style.display = 'none';
+  if (lastState) { draw(lastState); traceView(lastState, traceOf(lastState)); }
+}
+function stepNext(manual) {
+  const tr = lastState && traceOf(lastState);
+  if (!tr) return;
+  if (replay.k >= tr.all.length) {
+    if (tr.done) { replay.playing = false; banner(null, `끝: ${tr.all.length}단계, 실제로는 ${tr.all.at(-1).at - tr.all[0].at}ms 걸렸다`, 'data'); return; }
+    if (replay.playing || manual) replay.timer = setTimeout(() => stepNext(manual), 400); // 아직 기록이 오는 중
+    return;
+  }
+  const e = tr.all[replay.k++];
+  draw(lastState); traceView(lastState, tr);
+  playStep(e, tr);
+  if (replay.playing) replay.timer = setTimeout(stepNext, replay.stepMs);
+}
+function banner(e, text, kind) {
+  const b = document.getElementById('banner');
+  b.style.display = 'block';
+  b.style.borderColor = TRACE_COLOR[kind];
+  b.innerHTML = e ? `${kindTag(kind)} <b>${replay.k}.</b> ${STEP_ICON[e.step] || ''} ${esc(e.text)} <span class="muted">(실제 +${e.at - lastState._t0}ms)</span>` : esc(text);
+}
+function playStep(e, tr) {
+  const kind = STEP_KIND[e.step] || 'ctrl', color = TRACE_COLOR[kind];
+  lastState._t0 = tr.all[0].at;
+  banner(e, '', kind);
+  const ov = document.getElementById('overlay');
+  const seg = SEG[e.step + '|' + e.who] || SEG[e.step === 'acked' ? 'routed' : e.step];
+  const dur = replay.stepMs * 0.75;
+  if (Array.isArray(seg)) { // 한 점에서 일어나는 단계: 퍼지는 고리
+    const [x, y] = seg;
+    ov.innerHTML = `<circle id="ring" cx="${x}" cy="${y}" r="6" fill="none" stroke="${color}" stroke-width="3"/><circle cx="${x}" cy="${y}" r="6" fill="${color}"/>`;
+    const ring = ov.querySelector('#ring'), t0 = performance.now();
+    const tick = now => { const t = ((now - t0) % 700) / 700; ring.setAttribute('r', 6 + 18 * t); ring.setAttribute('opacity', 1 - t);
+      if (now - t0 < dur) requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+    return;
+  }
+  if (!seg) { ov.innerHTML = ''; return; }
+  const back = e.step === 'acked'; // ACK 는 리더에서 생산자 쪽으로 거꾸로 온다
+  ov.innerHTML = `<path id="rp" d="${seg}" fill="none" stroke="${color}" stroke-width="5" stroke-opacity=".35" stroke-dasharray="${kind === 'ctrl' ? '6 5' : ''}"/>
+    <circle id="dot" r="8" fill="${color}" stroke="#fff" stroke-width="2"/>`;
+  const path = ov.querySelector('#rp'), dot = ov.querySelector('#dot');
+  const len = path.getTotalLength(), t0 = performance.now();
+  const tick = now => {
+    const t = Math.min(1, (now - t0) / dur), u = back ? 1 - t : t;
+    const ease = u < .5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+    const pt = path.getPointAtLength(len * ease);
+    dot.setAttribute('cx', pt.x); dot.setAttribute('cy', pt.y);
+    if (t < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
 }
 
 function traceView(s, tr) {
   const body = document.getElementById('trace');
   if (!tr) return;
   document.getElementById('trTitle').textContent = tr.t ? `${tr.id} · ${tr.t.topic}-${tr.t.partition} offset ${tr.t.offset}` : tr.id;
-  const t0 = tr.events.length ? tr.events[0].at : 0;
-  const icon = {map: '🗺', routed: '🧭', stored: '💾', replicated: '📋', hw: '✅', acked: '📬', fetched: '📥', committed: '📌', failed: '❌'};
-  let rows = tr.events.map(e => `<tr><td>+${e.at - t0}ms</td><td>${icon[e.step] || '•'} <span class="dot" style="background:${C(e.broker)}" title="broker-${e.broker} 에서 기록"></span> ${esc(e.text)}</td></tr>`).join('');
-  // 아직 안 일어난 단계
+  const all = tr.all || tr.events;
+  const t0 = all.length ? all[0].at : 0;
+  let rows = all.map((e, i) => {
+    const k = STEP_KIND[e.step] || 'ctrl';
+    const cls = !replay.on ? '' : i >= replay.k ? 'future' : i === replay.k - 1 ? 'cur' : '';
+    return `<tr class="${cls}"><td>+${e.at - t0}ms</td><td>${kindTag(k)}${STEP_ICON[e.step] || '•'} <span class="dot" style="background:${C(e.broker)}" title="broker-${e.broker} 에서 기록"></span> ${esc(e.text)}</td></tr>`;
+  }).join('');
   const waits = [];
-  if (tr.t) {
+  if (tr.t && !replay.on) {
     const p = (s.metadata.topics[tr.t.topic] || {partitions: []}).partitions[tr.t.partition];
     if (p) p.isr.filter(id => id !== p.leader && !tr.has('replicated', 'broker-' + id)).forEach(id => waits.push(`broker-${id} 의 복제를 기다리는 중`));
     if (!tr.has('hw')) waits.push('HW 가 넘어가길 기다리는 중 (그 전엔 소비자에게 안 보인다)');
@@ -206,8 +322,8 @@ function tools(nodes) {
 
 function draw(s) {
   const meta = s.metadata, nodes = s.nodes;
-  const tr = traceOf(s);
-  const GOLD = '#c99a1e';
+  const tr = visibleTrace(traceOf(s));
+  const GOLD = TRACE_COLOR.data, CTRL = TRACE_COLOR.ctrl;
   const up = nodes.filter(n => n.reachable);
   const traffic = up.flatMap(n => (n.traffic || []).map(t => ({...t, broker: n.id})));
   const reps = {};
@@ -285,7 +401,7 @@ function draw(s) {
       const sub = off ? '<tspan fill="var(--bad)">리더 없음</tspan>'
         : lead ? `LEO ${lead.logEndOffset} · HW ${lead.highWatermark}${pending > 0 ? ` <tspan fill="var(--warn)">미복제 ${pending}</tspan>` : ''}` : '<tspan fill="var(--muted)">리더 응답 없음</tspan>';
       const traced = tr && tr.key === key;
-      const ttag = traced ? `<text x="${PX - PW / 2 + 70}" y="${cy - 3}" font-size="11" font-weight="700" fill="${GOLD}">📨 offset ${tr.t.offset}${tr.has('hw') ? ' · HW✓' : ''}</text>` : '';
+      const ttag = traced ? `<text x="${PX - PW / 2 + 70}" y="${cy - 3}" font-size="11" font-weight="700" fill="${GOLD}">📨 offset ${tr.t.offset}</text>${tr.has('hw') ? `<text x="${PX - PW / 2 + 190}" y="${cy - 3}" font-size="11" font-weight="700" fill="${CTRL}">HW✓</text>` : ''}` : '';
       parts += `<rect x="${PX - PW / 2}" y="${y}" width="${PW}" height="${PH}" rx="7" fill="var(--card)" stroke="${traced ? GOLD : off ? 'var(--bad)' : 'var(--line)'}" stroke-width="${traced ? 3 : off ? 2 : 1}"/>${ttag}
         <rect x="${PX - PW / 2}" y="${y}" width="6" height="${PH}" rx="3" fill="${off ? 'var(--bad)' : C(p.leader)}"/>
         <text x="${PX - PW / 2 + 14}" y="${cy - 3}" font-size="13" font-weight="700">${key}</text>
@@ -368,7 +484,7 @@ function draw(s) {
     gnodes += `<rect x="${x0}" y="${g.y}" width="${GW}" height="${g.h}" rx="12" fill="none" stroke="${color}" stroke-width="1.5" stroke-dasharray="${g.state === 'STABLE' ? '' : '6 4'}"/>
       <text x="${x0 + 10}" y="${g.y + 17}" font-size="12" font-weight="700">${esc(g.group)}</text>
       <text x="${x0 + GW - 10}" y="${g.y + 17}" text-anchor="end" font-size="11.5" fill="${color}" font-weight="600"><title>세대(generation): 재조정이 끝날 때마다 1씩 오른다</title>세대 ${g.generation} · ${label}</text>
-      ${tr && tr.t && tr.t.topic === g.topic && tr.has('committed', 'group ' + g.group) ? `<text x="${x0 + 12 + 7.5 * g.group.length}" y="${g.y + 17}" font-size="12"><title>📨 이 그룹이 그 메시지까지 오프셋을 커밋함</title>📌</text>` : ''}`;
+      ${tr && tr.t && tr.t.topic === g.topic && tr.has('committed', 'group ' + g.group) ? `<text x="${x0 + 12 + 7.5 * g.group.length}" y="${g.y + 17}" font-size="12" fill="${CTRL}"><title>📨 이 그룹이 그 메시지까지 오프셋을 커밋함 (컨트롤)</title>📌</text>` : ''}`;
     // 오프셋 커밋 → 코디네이터 브로커
     if (BX[g.coordinator]) {
       const active = commitBy[g.group];
@@ -401,28 +517,47 @@ function draw(s) {
     });
   });
 
-  // 📨 한 건의 경로: 보낸 곳 → 토픽 허브 → 파티션 → 가져간 소비자 → (커밋) 코디네이터
+  // 📨 한 건의 경로. 데이터(금색) = 메시지가 움직인 길, 컨트롤(청록) = 지도·커밋. 좌표는 재생용으로 SEG 에 남긴다
   let tracePath = '';
+  SEG = {};
   if (tr && tr.t && PY[tr.key] !== undefined) {
-    let ty = PY[tr.key];
+    const cy = PY[tr.key];
+    let ty = cy;
     for (const c of producers) if (Math.abs(c.y - ty) < 80) ty = c.y + 90;
-    const gold = (d, title, dash = '10 6', w = 3.2) => `<path d="${d}" fill="none" stroke="${GOLD}" stroke-width="${w}" stroke-dasharray="${dash}" ${anim(40)}><title>${title}</title></path>`;
-    tracePath += gold(curve(CX.produce + 40, ty, HUBX, topicY[tr.t.topic]), '📨 생산자 → 토픽 ' + tr.t.topic)
-      + gold(curve(HUBX, topicY[tr.t.topic], PX - PW / 2, PY[tr.key]), `hash(key) % 파티션 수 → ${tr.key}`);
-    const fetcher = tr.events.find(e => e.step === 'fetched');
-    if (fetcher && pos[fetcher.who]) {
-      const [mx, my] = pos[fetcher.who];
-      tracePath += gold(curve(PX + PW / 2, PY[tr.key], mx - NW / 2, my), `${tr.key} → ${fetcher.who} (HW 를 넘은 뒤 가져감)`);
-      const com = tr.events.find(e => e.step === 'committed');
-      if (com && BX[com.broker]) tracePath += gold(`M${mx + NW / 2 - 6},${my - MH / 2} Q${mx + NW / 2 + 30},${BY + 60} ${BX[com.broker] + BW / 2},${BY + 25}`,
-        `오프셋 커밋 → 코디네이터 broker-${com.broker}`, '3 5', 2.4);
-    }
- // 지도: 컨트롤러가 그린 메타데이터를 보고 리더를 찾았다 (메시지가 컨트롤러로 가는 건 아니다)
-    const map = tr.events.find(e => e.step === 'map');
+    const line = (show, d, color, title, dash = '10 6', w = 3.2) => show ?
+      `<path d="${d}" fill="none" stroke="${color}" stroke-width="${w}" stroke-dasharray="${dash}" ${anim(40)}><title>${title}</title></path>` : '';
+    const all = tr.all || tr.events;
+    // 🗺 지도: 컨트롤러 → 📨 (메시지가 컨트롤러로 가는 게 아니라, 컨트롤러가 그린 지도를 본다)
+    const map = all.find(e => e.step === 'map');
     const ctl = map ? Number(map.who.split('-')[1]) : meta.controllerId;
     if (BX[ctl]) {
-      tracePath += `<path d="M${BX[ctl] - BW / 2},${BY + 10} Q${CX.produce},${BY + 10} ${CX.produce},${ty - 17}" fill="none" stroke="${GOLD}" stroke-width="1.6" stroke-dasharray="2 4" opacity="0.9"><title>🗺 지도(메타데이터)는 컨트롤러 broker-${ctl} 가 그렸다. 생산자는 이걸 보고 리더를 찾을 뿐, 메시지는 컨트롤러를 거치지 않는다</title></path>
-        <text x="${CX.produce + 6}" y="${BY + 60}" font-size="11" fill="${GOLD}" font-weight="700">🗺 지도 (컨트롤러 broker-${ctl})</text>`;
+      SEG.map = `M${BX[ctl] - BW / 2},${BY + 10} Q${CX.produce},${BY + 10} ${CX.produce},${ty - 17}`;
+      if (tr.has('map')) tracePath += line(true, SEG.map, CTRL, `🗺 지도(메타데이터)는 컨트롤러 broker-${ctl} 가 그렸다. 메시지는 컨트롤러를 거치지 않는다`, '3 5', 1.8)
+        + `<text x="${CX.produce + 6}" y="${BY + 60}" font-size="11" fill="${CTRL}" font-weight="700">🗺 지도 (컨트롤러 broker-${ctl})</text>`;
+    }
+    // 🧭 생산자 → 토픽 → 파티션 리더
+    const r2 = curve(HUBX, topicY[tr.t.topic], PX - PW / 2, cy);
+    SEG.routed = curve(CX.produce + 40, ty, HUBX, topicY[tr.t.topic]) + ' ' + r2.replace(/^M[^C]*/, '');
+    tracePath += line(tr.has('routed'), SEG.routed, GOLD, `📨 → 토픽 ${tr.t.topic} → hash(key) % 파티션 수 → ${tr.key}`);
+    // 💾 리더 칸, 📋 팔로워 칸, ✅ HW (점 단계)
+    const pm = (meta.topics[tr.t.topic] || {partitions: []}).partitions[tr.t.partition];
+    if (pm) {
+      const cx = i => PX + 50 + i * 26, li = pm.replicas.indexOf(pm.leader);
+      SEG.stored = [cx(li), cy];
+      pm.replicas.forEach((id, i) => { if (id !== pm.leader) SEG['replicated|broker-' + id] = `M${cx(li)},${cy - 10} Q${(cx(li) + cx(i)) / 2},${cy - 30} ${cx(i)},${cy - 10}`; });
+    }
+    SEG.hw = [PX - PW / 2 + 40, cy + 12];
+    // 📥 파티션 → 가져간 소비자, 📌 소비자 → 코디네이터
+    const fetcher = all.find(e => e.step === 'fetched');
+    if (fetcher && pos[fetcher.who]) {
+      const [mx, my] = pos[fetcher.who];
+      SEG['fetched|' + fetcher.who] = curve(PX + PW / 2, cy, mx - NW / 2, my);
+      tracePath += line(tr.has('fetched'), SEG['fetched|' + fetcher.who], GOLD, `${tr.key} → ${fetcher.who} (HW 를 넘은 뒤 가져감)`);
+      const com = all.find(e => e.step === 'committed');
+      if (com && BX[com.broker]) {
+        SEG['committed|' + com.who] = `M${mx + NW / 2 - 6},${my - MH / 2} Q${mx + NW / 2 + 30},${BY + 60} ${BX[com.broker] + BW / 2},${BY + 25}`;
+        tracePath += line(tr.has('committed'), SEG['committed|' + com.who], CTRL, `오프셋 커밋 → 그룹 코디네이터 broker-${com.broker}`, '3 5', 2.4);
+      }
     }
     tracePath += `<g><rect x="${CX.produce - 40}" y="${ty - 17}" width="80" height="34" rx="9" fill="var(--card)" stroke="${GOLD}" stroke-width="2.5"/>
       <text x="${CX.produce}" y="${ty + 5}" text-anchor="middle" font-size="13" font-weight="700">📨 한 건</text><title>${esc(tr.id)}</title></g>`;
@@ -449,6 +584,7 @@ function draw(s) {
   const fullH = Math.max(y + 10, 330, ...producers.map(c => c.y + NH), ...groups.map(g => g.y + g.h + 10));
   const el = document.getElementById('flow');
   el.setAttribute('viewBox', `0 0 1100 ${fullH}`);
+  document.getElementById('overlay').setAttribute('viewBox', `0 0 1100 ${fullH}`);
   el.innerHTML = edges + svg + parts + cl + heads + tracePath;
 }
 
@@ -484,6 +620,7 @@ async function refresh() {
   let s;
   try { s = await (await fetch('/admin/cluster')).json(); }
   catch (e) { document.getElementById('updated').textContent = '연결 안 됨 — 8081~8083 중 다른 포트로'; return; }
+  lastState = s;
   tools(s.nodes);
   flowbar(s.metadata);
   draw(s);
@@ -497,7 +634,7 @@ document.getElementById('flow').addEventListener('click', async (e) => {
   const q = new URLSearchParams({group: b.dataset.group, member: b.dataset.member, cmd: b.dataset.cmd});
   await fetch('/admin/cluster/group-command?' + q, {method: 'POST'}).catch(() => {});
 });
-refresh();
+refresh().then(() => { if (new URLSearchParams(location.search).has('replay')) startReplay(); }); // ?trace=…&replay=1
 setInterval(refresh, 1000);
 </script>
 </body>
