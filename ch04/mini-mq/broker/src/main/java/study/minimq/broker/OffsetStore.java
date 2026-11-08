@@ -1,98 +1,66 @@
 package study.minimq.broker;
 
-import java.util.ArrayList;
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
 
-import study.minimq.common.Message;
+import study.minimq.broker.zk.Coordination;
 import study.minimq.common.OffsetCommit;
-import study.minimq.common.ProduceRecord;
-import study.minimq.common.Topics;
 
 /**
- * 상태 저장소: 소비자 그룹별·파티션별 마지막으로 소비한 오프셋 (그림 4.21).
+ * 상태 저장소: 소비자 그룹별·파티션별 마지막으로 소비한 오프셋 (그림 4.21, 4.22).
  *
- * <p>카프카처럼 내부 토픽 {@code __consumer_offsets} 에 "그룹|토픽|파티션 → 오프셋" 레코드로 쓴다.
- * 그룹 이름 해시로 파티션이 정해지고(그림 4.15), 그 파티션의 리더 브로커가 이 그룹의 오프셋을 맡는다.
- * 일반 메시지와 똑같이 복제되므로 리더가 죽어도 새 리더가 로그를 다시 읽어 이어 간다.
+ * <p>교재처럼 조정 서비스(ZooKeeper-lite)에 둔다: /offsets/{그룹}/{토픽}/{파티션} = 오프셋.
+ * 소비자는 그룹 코디네이터 브로커에 커밋하고, 코디네이터가 세대를 확인한 뒤 조정 서비스에 쓴다.
+ * 브로커가 죽어도 오프셋은 조정 서비스에 남는다.
  */
 @Component
 public class OffsetStore {
-    private final ReplicaManager replicas;
+    private final Coordination coord;
     private final Traces traces;
     private final BrokerProperties props;
-    private final Map<Integer, Map<String, Long>> cache = new ConcurrentHashMap<>(); // 오프셋 파티션 → (키 → 오프셋)
+    private final ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor();
 
-    public OffsetStore(ReplicaManager replicas, Traces traces, BrokerProperties props) {
-        this.replicas = replicas;
+    public OffsetStore(Coordination coord, Traces traces, BrokerProperties props) {
+        this.coord = coord;
         this.traces = traces;
         this.props = props;
-        replicas.onBecomeLeader((topic, partition) -> {
-            if (topic.equals(Topics.CONSUMER_OFFSETS)) rebuild(partition);
-        });
     }
 
-    /** 리더가 되면 로그를 처음부터 읽어 최신 값을 다시 만든다. */
-    private void rebuild(int partition) {
-        Map<String, Long> m = new ConcurrentHashMap<>();
-        for (Message msg : replicas.readAll(Topics.CONSUMER_OFFSETS, partition)) m.put(msg.key(), Long.parseLong(msg.value()));
-        cache.put(partition, m);
-    }
-
-    /** 한 그룹의 여러 파티션 오프셋을 한 번에, ACK=all 로 쓴다. */
+    /** 한 그룹의 여러 파티션 오프셋을 조정 서비스에 쓴다. */
     public CompletableFuture<Void> commit(List<OffsetCommit> commits) {
         if (commits.isEmpty()) return CompletableFuture.completedFuture(null);
         String group = commits.get(0).group();
         if (commits.stream().anyMatch(c -> !c.group().equals(group))) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "한 번에 한 그룹만");
         }
-        int p = Topics.offsetsPartition(group);
-        List<ProduceRecord> records = new ArrayList<>();
-        long now = System.currentTimeMillis();
-        for (OffsetCommit c : commits) records.add(new ProduceRecord(key(c.group(), c.topic(), c.partition()), Long.toString(c.offset()), now));
-        return replicas.produce(Topics.CONSUMER_OFFSETS, p, -1, records).thenAccept(range -> {
-            Map<String, Long> m = cache.computeIfAbsent(p, x -> new ConcurrentHashMap<>());
-            records.forEach(r -> m.put(r.key(), Long.parseLong(r.value())));
-            for (OffsetCommit c : commits) {
-                traces.hit(c.topic(), c.partition(), 0, c.offset() + 1, "committed", "group " + c.group(),
-                        "그룹 " + c.group() + " 이 offset " + c.offset() + " 까지 커밋 → {offset} 처리 끝 (코디네이터 broker-" + props.brokerId() + ")");
+        return CompletableFuture.runAsync(() -> {
+            try {
+                for (OffsetCommit c : commits) {
+                    coord.putOffset(c.group(), c.topic(), c.partition(), c.offset());
+                    traces.hit(c.topic(), c.partition(), 0, c.offset() + 1, "committed", "group " + c.group(),
+                            "그룹 " + c.group() + " 의 코디네이터 broker-" + props.brokerId() + " 가 ZooKeeper-lite /offsets/" + c.group() + "/"
+                                    + c.topic() + "/" + c.partition() + " = " + c.offset() + " 로 기록 → {offset} 처리 끝");
+                }
+            } catch (IOException e) {
+                throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "조정 서비스에 오프셋을 못 씀: " + e.getMessage());
             }
-        });
+        }, pool);
     }
 
     /** 그룹이 이 토픽에서 파티션별로 마지막으로 소비한 오프셋. 없는 파티션은 빠진다. */
     public Map<Integer, Long> committed(String group, String topic) {
-        int p = Topics.offsetsPartition(group);
-        replicas.leaderReplica(Topics.CONSUMER_OFFSETS, p); // 이 브로커가 코디네이터가 아니면 409
-        Map<Integer, Long> out = new TreeMap<>();
-        String prefix = group + "|" + topic + "|";
-        cache.getOrDefault(p, Map.of()).forEach((k, v) -> {
-            if (k.startsWith(prefix)) out.put(Integer.parseInt(k.substring(prefix.length())), v);
-        });
-        return out;
-    }
-
-    /** 대시보드용: 이 브로커가 코디네이터인 그룹들의 오프셋. */
-    public List<OffsetCommit> all() {
-        List<OffsetCommit> out = new ArrayList<>();
-        cache.forEach((p, m) -> {
-            if (!replicas.isLeader(Topics.CONSUMER_OFFSETS, p)) return;
-            m.forEach((k, v) -> {
-                String[] parts = k.split("\\|");
-                out.add(new OffsetCommit(parts[0], parts[1], Integer.parseInt(parts[2]), v));
-            });
-        });
-        return out;
-    }
-
-    private static String key(String group, String topic, int partition) {
-        return group + "|" + topic + "|" + partition;
+        try {
+            return coord.offsets(group, topic);
+        } catch (IOException e) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "조정 서비스에서 오프셋을 못 읽음: " + e.getMessage());
+        }
     }
 }

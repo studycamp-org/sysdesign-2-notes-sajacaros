@@ -101,13 +101,17 @@ public class BrokerApi {
                                           @RequestParam(required = false) String memberId,
                                           @RequestParam(required = false) Integer generation,
                                           @RequestHeader(value = CLIENT, required = false) String client) {
-        if (!commits.isEmpty()) groups.checkGeneration(commits.get(0).group(), memberId, generation);
+        if (!commits.isEmpty()) {
+            groups.checkCoordinator(commits.get(0).group());
+            groups.checkGeneration(commits.get(0).group(), memberId, generation);
+        }
         traffic.record(client, "commit", "", -1, 1, commits.isEmpty() ? null : commits.get(0).group());
         return offsets.commit(commits);
     }
 
     @GetMapping("/offsets")
     public Map<Integer, Long> committed(@RequestParam String group, @RequestParam String topic) {
+        groups.checkCoordinator(group);
         return offsets.committed(group, topic);
     }
 

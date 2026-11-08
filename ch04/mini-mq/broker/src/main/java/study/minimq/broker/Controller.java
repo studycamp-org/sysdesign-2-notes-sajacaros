@@ -132,12 +132,6 @@ public class Controller {
         if (!coord.isLeader()) return;
         ClusterMetadata m = coord.accepted();
         if (m.controllerId() != props.brokerId()) return; // 컨트롤러 기록이 메타데이터에 반영되기 전
-        if (!m.topics().containsKey(Topics.CONSUMER_OFFSETS)) {
-            // 기다리지 않는다: 스케줄 작업이 막히면 안 된다
-            coord.propose(x -> x.topics().containsKey(Topics.CONSUMER_OFFSETS) ? x
-                    : x.withTopic(plan(new TopicInfo(Topics.CONSUMER_OFFSETS, Topics.CONSUMER_OFFSETS_PARTITIONS, 3, 2), x)));
-            return;
-        }
         java.util.Set<Integer> live = coord.liveBrokers();
         boolean grace = coord.controllerAgeMs() < 5000; // 막 컨트롤러가 됐을 땐 다른 브로커가 아직 등록 전일 수 있다
         for (BrokerInfo b : m.brokers().values()) {

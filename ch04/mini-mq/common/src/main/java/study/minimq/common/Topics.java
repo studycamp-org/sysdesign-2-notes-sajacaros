@@ -1,19 +1,29 @@
 package study.minimq.common;
 
-/** 내부 토픽. 소비자 그룹 오프셋을 복제된 로그로 저장한다 (카프카와 같은 방식). */
-public final class Topics {
-    public static final String CONSUMER_OFFSETS = "__consumer_offsets";
-    public static final int CONSUMER_OFFSETS_PARTITIONS = 3;
+import java.util.List;
 
+/** 토픽 이름 규칙과 그룹 코디네이터 정하기. */
+public final class Topics {
     private Topics() {
     }
 
+    /** __ 로 시작하면 내부용 (보관 기간으로 지우지 않는다). */
     public static boolean internal(String topic) {
         return topic.startsWith("__");
     }
 
-    /** 그룹의 오프셋이 들어갈 파티션. 이 파티션의 리더가 그 그룹의 코디네이터다 (그림 4.15: 그룹 이름 해시). */
-    public static int offsetsPartition(String group) {
-        return Partitioner.forKey(group, CONSUMER_OFFSETS_PARTITIONS);
+    /**
+     * 그룹 코디네이터 (그림 4.15: 그룹 이름을 해싱해 전담 브로커를 찾는다).
+     * 살아 있는 브로커를 번호순으로 늘어놓고 hash(그룹) % 개수 번째. 지도만 있으면 누구나 같은 답을 낸다.
+     * 브로커가 죽거나 돌아오면 바뀔 수 있다 → 그 그룹은 새 코디네이터에 다시 합류한다.
+     */
+    public static int coordinatorFor(String group, ClusterMetadata m) {
+        List<Integer> alive = m.brokers().values().stream().filter(BrokerInfo::alive).map(BrokerInfo::id).sorted().toList();
+        return alive.isEmpty() ? -1 : alive.get(Partitioner.forKey(group, alive.size()));
+    }
+
+    /** ZooKeeper-lite 의 오프셋 경로 (상태 저장소, 그림 4.22). */
+    public static String offsetPath(String group, String topic) {
+        return "/offsets/" + group + "/" + topic;
     }
 }

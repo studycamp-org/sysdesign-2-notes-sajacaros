@@ -26,7 +26,7 @@ import study.minimq.common.GroupProtocol.SyncResponse;
 import study.minimq.common.Topics;
 
 /**
- * 소비자 그룹 코디네이터 (그림 4.15~4.20). 이 브로커가 그룹의 __consumer_offsets 파티션 리더일 때만 받는다.
+ * 소비자 그룹 코디네이터 (그림 4.15~4.20). 그룹 이름 해시로 정해진 브로커(Topics.coordinatorFor)일 때만 받는다.
  *
  * <pre>
  *   EMPTY ──join──▶ 재조정 준비 ──모두 합류 또는 시간 끝──▶ 배정 대기 ──리더가 계획 보냄──▶ 안정
@@ -84,7 +84,7 @@ public class GroupCoordinator {
     }
 
     private boolean isCoordinator(String group) {
-        return replicas.isLeader(Topics.CONSUMER_OFFSETS, Topics.offsetsPartition(group));
+        return Topics.coordinatorFor(group, coord.committed()) == props.brokerId();
     }
 
     private Group group(String name) {
@@ -254,6 +254,11 @@ public class GroupCoordinator {
     // ------------------------------------------------------------------ 오프셋 커밋 펜싱 · 대시보드
 
     /** 재조정 전의 낡은 멤버(세대가 다름)가 커밋하지 못하게 막는다. memberId 가 없으면(정적 배정) 검사하지 않는다. */
+    /** 이 브로커가 그 그룹의 코디네이터가 아니면 409 (소비자는 지도를 다시 받아 찾아간다). */
+    public void checkCoordinator(String group) {
+        if (!isCoordinator(group)) throw new ResponseStatusException(HttpStatus.CONFLICT, "NOT_COORDINATOR: 그룹 " + group + " 의 코디네이터가 아님");
+    }
+
     public void checkGeneration(String group, String memberId, Integer generation) {
         if (memberId == null) return;
         Group g = groups.get(group);

@@ -259,6 +259,49 @@ public final class Coordination {
         return f;
     }
 
+    // ------------------------------------------------------------------ 상태 저장소: 소비자 그룹 오프셋 (그림 4.22)
+
+    /** /offsets/{그룹}/{토픽}/{파티션} = 마지막으로 소비한 오프셋. 없으면 만든다(상위 노드도). */
+    public void putOffset(String group, String topic, int partition, long offset) throws IOException {
+        String base = study.minimq.common.Topics.offsetPath(group, topic), path = base + "/" + partition;
+        try {
+            zk.set(path, Long.toString(offset), -1, null, null);
+        } catch (ZkClient.ZkError e) {
+            if (!"NO_NODE".equals(e.code)) throw e;
+            ensurePath(base);
+            try {
+                zk.create(path, Long.toString(offset), null);
+            } catch (ZkClient.ZkError e2) {
+                if (!"NODE_EXISTS".equals(e2.code)) throw e2;
+                zk.set(path, Long.toString(offset), -1, null, null);
+            }
+        }
+    }
+
+    /** 그룹이 이 토픽에서 파티션별로 마지막으로 소비한 오프셋. */
+    public Map<Integer, Long> offsets(String group, String topic) throws IOException {
+        String base = study.minimq.common.Topics.offsetPath(group, topic);
+        Map<Integer, Long> out = new TreeMap<>();
+        try {
+            for (String c : zk.children(base)) out.put(Integer.parseInt(c), Long.parseLong(zk.get(base + "/" + c).data().trim()));
+        } catch (ZkClient.ZkError e) {
+            if (!"NO_NODE".equals(e.code)) throw e;
+        }
+        return out;
+    }
+
+    private void ensurePath(String path) throws IOException {
+        StringBuilder cur = new StringBuilder();
+        for (String part : path.substring(1).split("/")) {
+            cur.append('/').append(part);
+            try {
+                zk.create(cur.toString(), null, null);
+            } catch (ZkClient.ZkError e) {
+                if (!"NODE_EXISTS".equals(e.code)) throw e;
+            }
+        }
+    }
+
     // ------------------------------------------------------------------ 바깥에서 보는 것
 
     public void addListener(Consumer<ClusterMetadata> l) {

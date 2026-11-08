@@ -52,7 +52,6 @@ public class AdminApi {
         out.put("coord", coord.state());
         out.put("replicationDelayMs", replicas.replicationDelayMs());
         out.put("replicas", replicas.states());
-        out.put("offsets", offsets.all());
         out.put("traffic", traffic.snapshot());
         out.put("groups", groups.states());
         out.put("trace", traces.snapshot());

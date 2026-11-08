@@ -4,7 +4,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 소비자 그룹 재조정 프로토콜 (그림 4.15~4.20). 코디네이터 = 그룹 이름 해시로 정한 __consumer_offsets 파티션의 리더.
+ * 소비자 그룹 재조정 프로토콜 (그림 4.15~4.20). 코디네이터 = 그룹 이름 해시로 정한 살아 있는 브로커 (Topics.coordinatorFor).
  *
  * <ol>
  *   <li>join: 모든 멤버가 (다시) 합류한다. 코디네이터는 모두 오거나 시간이 다 되면 세대를 올리고 리더 소비자를 뽑는다</li>

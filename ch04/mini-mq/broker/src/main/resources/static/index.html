@@ -80,7 +80,7 @@
     </div>
     <div class="legend">
       <span><i style="border-color:var(--data)"></i>데이터: 메시지가 움직임 (생산 · 복제 · 소비)</span>
-      <span><i style="border-color:var(--ctrl);border-top-style:dashed"></i>컨트롤: 조정 서비스 세션 박동 · 지도(/metadata) · HW · ACK · 오프셋 커밋</span>
+      <span><i style="border-color:var(--ctrl);border-top-style:dashed"></i>컨트롤: 조정 서비스 세션 박동 · 지도(/metadata) · HW · ACK · 오프셋 커밋(/offsets)</span>
       <span>사본 줄: <b>★</b> 리더 · 실선 ISR · 점선 ISR 밖 · 같은 색 = 같은 파티션</span>
     </div>
   </section>
@@ -409,7 +409,7 @@ function draw(s) {
   // ---- 가운데: 브로커 상자 안에 사본
   const PX = 600, PW = 340, HEADH = 50, RH = 32, TOPH = 20;
   const BOX = {}, ROW = {};
-  const ZK = {x: PX - PW / 2, y: 30, w: PW, h: 104};
+  const ZK = {x: PX - PW / 2, y: 30, w: PW, h: 124};
   let y = ZK.y + ZK.h + 26;
   Object.keys(meta.brokers).map(Number).sort((a, b) => a - b).forEach(b => {
     const n = nodes.find(x => x.id === b) || {id: b};
@@ -477,7 +477,11 @@ function draw(s) {
     <text x="${ZK.x + ZK.w - 12}" y="${ZK.y + 21}" text-anchor="end" font-size="11" fill="var(--muted)">${zk.reachable === false ? '<tspan fill="var(--bad)">응답 없음</tspan>' : `zxid ${zk.zxid ?? '?'}`}</text>
     <text x="${ZK.x + 14}" y="${ZK.y + 44}" font-size="12"><tspan font-weight="700">/controller</tspan> <tspan fill="var(--muted)">(임시 노드)</tspan> → ${zc ? `<tspan font-weight="700" fill="var(--accent)">broker-${esc(zc.data)}</tspan> <tspan fill="var(--muted)">epoch ${zc.czxid}</tspan>` : '<tspan fill="var(--warn)">비어 있음</tspan>'}</text>
     <text x="${ZK.x + 14}" y="${ZK.y + 64}" font-size="12"><tspan font-weight="700">/brokers</tspan> <tspan fill="var(--muted)">(임시 노드 = 살아 있는 브로커)</tspan> → ${regs.length ? regs.map(r => `broker-${r}`).join(' · ') : '없음'}</text>
-    <text x="${ZK.x + 14}" y="${ZK.y + 84}" font-size="12"><tspan font-weight="700">/metadata</tspan> <tspan fill="var(--muted)">(지도: 토픽·사본·ISR)</tspan> → 버전 ${zm ? zm.version : '?'}</text></g>`;
+    <text x="${ZK.x + 14}" y="${ZK.y + 84}" font-size="12"><tspan font-weight="700">/metadata</tspan> <tspan fill="var(--muted)">(지도: 토픽·사본·ISR)</tspan> → 버전 ${zm ? zm.version : '?'}</text>
+    <text x="${ZK.x + 14}" y="${ZK.y + 104}" font-size="12"><tspan font-weight="700">/offsets</tspan> <tspan fill="var(--muted)">(상태 저장소: 그룹별 오프셋)</tspan> → ${(() => {
+      const by = {}; zkOffsets(s).forEach(o => { (by[o.group] ||= []).push(`${o.partition}:${o.offset}`); });
+      return Object.keys(by).length ? Object.entries(by).map(([g, v]) => `${esc(g)} ${v.sort().join(' ')}`).join(' · ') : '없음';
+    })()}</text></g>`;
   const sessions = {};
   (zk.sessions || []).forEach(x => { sessions[x.name] = x; });
   Object.keys(BOX).map(Number).forEach(b => {
@@ -575,10 +579,10 @@ function draw(s) {
   const fetchRate = {};
   live.filter(t => t.kind === 'fetch').forEach(t => { fetchRate[`${t.client}|${t.topic}-${t.partition}`] = (fetchRate[`${t.client}|${t.topic}-${t.partition}`] || 0) + t.rate; });
   const lagOf = {};
-  up.forEach(n => (n.offsets || []).forEach(o => {
+  zkOffsets(s).forEach(o => {
     const l = (reps[`${o.topic}-${o.partition}`] || {})[(meta.topics[o.topic]?.partitions[o.partition] || {}).leader];
     if (l) lagOf[`${o.group}|${o.topic}-${o.partition}`] = Math.max(0, l.highWatermark - 1 - o.offset);
-  }));
+  });
   const STATE = {STABLE: ['안정', 'var(--ok)'], PREPARING_REBALANCE: ['⏳ 재조정 중', 'var(--warn)'], AWAITING_SYNC: ['⏳ 배정 대기', 'var(--warn)'], EMPTY: ['비었음', 'var(--muted)']};
   let gy = 30;
   up.flatMap(n => (n.groups || []).map(g => ({...g, coordinator: n.id})))
@@ -609,9 +613,11 @@ function draw(s) {
             opacity="${traced ? 1 : r ? 0.85 : 0.3}" ${anim(r)}><title>${key} 의 리더 broker-${pm.leader} → ${m.id}</title></path>`;
         });
         if (BOX[g.coordinator] && tr && tr.key && tr.key.startsWith(g.topic + '-') && m.assigned.includes(tr.t.partition)) {
-          const d = `M${mx + NW / 2 - 8},${my - MH / 2} C${mx + NW / 2 + 20},${my - 60} ${PX + PW / 2 + 90},${head(g.coordinator) + 6} ${PX + PW / 2},${head(g.coordinator) + 6}`;
+          // 소비자 → 그룹 코디네이터 브로커 → 조정 서비스의 /offsets
+          const hx = PX + PW / 2, hy = head(g.coordinator) + 6, zx = ZK.x + ZK.w, zy = ZK.y + 104;
+          const d = `M${mx + NW / 2 - 8},${my - MH / 2} C${mx + NW / 2 + 20},${my - 60} ${hx + 90},${hy} ${hx},${hy} C${hx + 70},${hy} ${zx + 70},${zy} ${zx},${zy}`;
           SEG[`committed|group ${g.group}`] = d;
-          if (tr.has('committed', 'group ' + g.group)) tracePath += `<path d="${d}" fill="none" stroke="var(--ctrl)" stroke-width="2.4" stroke-dasharray="3 5"><title>오프셋 커밋 → 코디네이터 broker-${g.coordinator}</title></path>`;
+          if (tr.has('committed', 'group ' + g.group)) tracePath += `<path d="${d}" fill="none" stroke="var(--ctrl)" stroke-width="2.4" stroke-dasharray="3 5"><title>오프셋 커밋: 코디네이터 broker-${g.coordinator} 를 거쳐 ZooKeeper-lite /offsets 에 기록</title></path>`;
         }
         const tag = m.id.slice(m.id.lastIndexOf('#'));
         const sub = idle ? (g.state === 'STABLE' ? '놀고 있음 (파티션 < 소비자)' : '배정 기다리는 중') : `파티션 ${m.assigned.join(',')} · lag ${mlag}`;
@@ -676,6 +682,12 @@ function traceView(s, tr) {
   body.innerHTML = rows || '<tr class="wait"><td></td><td>기록을 모으는 중…</td></tr>';
 }
 
+/** 조정 서비스(상태 저장소)의 오프셋 노드: /offsets/{그룹}/{토픽}/{파티션} = 오프셋. */
+function zkOffsets(s) {
+  return ((s.zk || {}).nodes || []).map(n => /^\/offsets\/([^/]+)\/([^/]+)\/(\d+)$/.exec(n.path) && {n, m: /^\/offsets\/([^/]+)\/([^/]+)\/(\d+)$/.exec(n.path)})
+    .filter(Boolean).map(({n, m}) => ({group: m[1], topic: m[2], partition: Number(m[3]), offset: Number(n.data)}));
+}
+
 function tables(s) {
   const meta = s.metadata, up = s.nodes.filter(n => n.reachable);
   const reps = {};
@@ -688,11 +700,11 @@ function tables(s) {
   }));
   document.getElementById('ptable').innerHTML = rows.join('');
   const groups = {};
-  up.forEach(n => (n.offsets || []).forEach(o => {
+  zkOffsets(s).forEach(o => {
     const g = (groups[`${o.group}|${o.topic}`] ||= {group: o.group, topic: o.topic, parts: {}});
     const l = (reps[`${o.topic}-${o.partition}`] || {})[(meta.topics[o.topic]?.partitions[o.partition] || {}).leader];
     g.parts[o.partition] = l ? Math.max(0, l.highWatermark - 1 - o.offset) : null;
-  }));
+  });
   document.getElementById('gtable').innerHTML = Object.values(groups).map(g => {
     const e = Object.entries(g.parts).sort((a, b) => a[0] - b[0]);
     return `<tr><td>${esc(g.group)}</td><td>${esc(g.topic)}</td><td class="num">${e.reduce((a, [, v]) => a + (v || 0), 0)}</td>

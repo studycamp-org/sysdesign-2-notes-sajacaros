@@ -32,13 +32,12 @@ import study.minimq.common.Topics;
 /**
  * 소비자 클라이언트 (그림 4.14~4.20). 풀 모델 + 롱 폴링, 소비자 그룹.
  *
- * <p><b>그룹 모드</b>(partitions 를 비우면): 그룹 코디네이터(= __consumer_offsets 에서 그룹 이름 해시로 정해진
- * 파티션의 리더)에 합류하고, 리더 소비자로 뽑히면 파티션 배치 계획을 만든다. 1초마다 박동을 보내고,
+ * <p><b>그룹 모드</b>(partitions 를 비우면): 그룹 코디네이터(그룹 이름 해시로 정한 살아 있는 브로커)에 합류하고, 리더 소비자로 뽑히면 파티션 배치 계획을 만든다. 1초마다 박동을 보내고,
  * 응답이 "다시 합류하라"면 다음 poll 때 재조정에 들어간다. 재조정 동안은 소비하지 않는다.
  *
  * <p><b>정적 모드</b>(partitions 를 주면): 그룹 없이 그 파티션만 읽는다.
  *
- * <p>파티션은 리더 브로커에서 HW(합의 오프셋) 앞까지만 받는다. 오프셋은 코디네이터에 커밋한다.
+ * <p>파티션은 리더 브로커에서 HW(합의 오프셋) 앞까지만 받는다. 오프셋은 코디네이터를 거쳐 조정 서비스(ZooKeeper-lite)에 커밋한다.
  * {@link #commit()} 을 처리 전에 부르면 최대 한 번, 처리 후에 부르면 최소 한 번.
  */
 public final class Consumer implements AutoCloseable {
@@ -168,7 +167,10 @@ public final class Consumer implements AutoCloseable {
     }
 
     private MiniMqHttp coordinator() throws IOException {
-        return view.leader(Topics.CONSUMER_OFFSETS, Topics.offsetsPartition(cfg.group()));
+        var m = view.metadata();
+        var b = m.brokers().get(Topics.coordinatorFor(cfg.group(), m));
+        if (b == null) throw new IOException("그룹 코디네이터를 모름");
+        return view.http(b.url());
     }
 
     // ------------------------------------------------------------------ 소비
