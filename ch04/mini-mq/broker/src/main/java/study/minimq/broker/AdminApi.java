@@ -139,8 +139,10 @@ public class AdminApi {
         int n = t.partitions().size();
         int p = study.minimq.common.Partitioner.forKey(id, n);
         int leader = t.partitions().get(p).leader();
+        traces.record(id, "map", "controller-" + m.controllerId(), "🗺 지도: 메타데이터 v" + m.version() + " (컨트롤러 broker-" + m.controllerId()
+                + " 가 그려 과반에 복제한 사본 분산 계획) — 지금 보는 건 broker-" + props.brokerId() + " 에 복제된 사본. 메시지는 컨트롤러를 거치지 않는다");
         traces.record(id, "routed", "client", "📨 생산자: 키 \"" + id + "\" → hash(key) % " + n + " = 파티션 " + p
-                + " → 지도(메타데이터 v" + m.version() + ")에서 리더 broker-" + leader + " 를 찾아 바로 보냄");
+                + " → 지도에서 그 파티션의 리더 broker-" + leader + " 를 찾아 바로 보냄");
         traffic.record("📨 한 건", "produce", topic, p, 1, acks);
         int acksValue = "all".equalsIgnoreCase(acks) ? -1 : Integer.parseInt(acks);
         long t0 = System.currentTimeMillis();

@@ -78,6 +78,7 @@
       <span><i style="border-color:var(--beat);border-top-style:dashed"></i>컨트롤러 박동 + 메타데이터 복제</span>
       <span><i style="border-color:var(--route);border-top-style:dotted"></i>지도(메타데이터) 받기 = 라우팅</span>
       <span><i style="border-color:var(--commit);border-top-style:dotted"></i>그룹 → 코디네이터 브로커 (박동·합류·커밋)</span>
+      <span><i style="border-color:#c99a1e"></i>📨 한 건의 경로 · <b style="color:#c99a1e">⋯</b> 지도를 그린 컨트롤러</span>
       <span>사본 칸: <b>꽉 참</b> ISR · <b>점선</b> ISR 밖 · ★ 리더 · 칸 위 화살표 = 복제 (주황 뒤처짐 · 빨강 ISR 밖)</span>
     </div>
   </section>
@@ -172,7 +173,7 @@ function traceView(s, tr) {
   if (!tr) return;
   document.getElementById('trTitle').textContent = tr.t ? `${tr.id} · ${tr.t.topic}-${tr.t.partition} offset ${tr.t.offset}` : tr.id;
   const t0 = tr.events.length ? tr.events[0].at : 0;
-  const icon = {routed: '🧭', stored: '💾', replicated: '📋', hw: '✅', acked: '📬', fetched: '📥', committed: '📌', failed: '❌'};
+  const icon = {map: '🗺', routed: '🧭', stored: '💾', replicated: '📋', hw: '✅', acked: '📬', fetched: '📥', committed: '📌', failed: '❌'};
   let rows = tr.events.map(e => `<tr><td>+${e.at - t0}ms</td><td>${icon[e.step] || '•'} <span class="dot" style="background:${C(e.broker)}" title="broker-${e.broker} 에서 기록"></span> ${esc(e.text)}</td></tr>`).join('');
   // 아직 안 일어난 단계
   const waits = [];
@@ -367,7 +368,7 @@ function draw(s) {
     gnodes += `<rect x="${x0}" y="${g.y}" width="${GW}" height="${g.h}" rx="12" fill="none" stroke="${color}" stroke-width="1.5" stroke-dasharray="${g.state === 'STABLE' ? '' : '6 4'}"/>
       <text x="${x0 + 10}" y="${g.y + 17}" font-size="12" font-weight="700">${esc(g.group)}</text>
       <text x="${x0 + GW - 10}" y="${g.y + 17}" text-anchor="end" font-size="11.5" fill="${color}" font-weight="600"><title>세대(generation): 재조정이 끝날 때마다 1씩 오른다</title>세대 ${g.generation} · ${label}</text>
-      ${tr && tr.t && tr.t.topic === g.topic && tr.has('committed', 'group ' + g.group) ? `<text x="${x0 + 12 + 7.5 * g.group.length}" y="${g.y + 17}" font-size="11" font-weight="700" fill="${GOLD}">📌 커밋됨</text>` : ''}`;
+      ${tr && tr.t && tr.t.topic === g.topic && tr.has('committed', 'group ' + g.group) ? `<text x="${x0 + 12 + 7.5 * g.group.length}" y="${g.y + 17}" font-size="12"><title>📨 이 그룹이 그 메시지까지 오프셋을 커밋함</title>📌</text>` : ''}`;
     // 오프셋 커밋 → 코디네이터 브로커
     if (BX[g.coordinator]) {
       const active = commitBy[g.group];
@@ -415,6 +416,13 @@ function draw(s) {
       const com = tr.events.find(e => e.step === 'committed');
       if (com && BX[com.broker]) tracePath += gold(`M${mx + NW / 2 - 6},${my - MH / 2} Q${mx + NW / 2 + 30},${BY + 60} ${BX[com.broker] + BW / 2},${BY + 25}`,
         `오프셋 커밋 → 코디네이터 broker-${com.broker}`, '3 5', 2.4);
+    }
+ // 지도: 컨트롤러가 그린 메타데이터를 보고 리더를 찾았다 (메시지가 컨트롤러로 가는 건 아니다)
+    const map = tr.events.find(e => e.step === 'map');
+    const ctl = map ? Number(map.who.split('-')[1]) : meta.controllerId;
+    if (BX[ctl]) {
+      tracePath += `<path d="M${BX[ctl] - BW / 2},${BY + 10} Q${CX.produce},${BY + 10} ${CX.produce},${ty - 17}" fill="none" stroke="${GOLD}" stroke-width="1.6" stroke-dasharray="2 4" opacity="0.9"><title>🗺 지도(메타데이터)는 컨트롤러 broker-${ctl} 가 그렸다. 생산자는 이걸 보고 리더를 찾을 뿐, 메시지는 컨트롤러를 거치지 않는다</title></path>
+        <text x="${CX.produce + 6}" y="${BY + 60}" font-size="11" fill="${GOLD}" font-weight="700">🗺 지도 (컨트롤러 broker-${ctl})</text>`;
     }
     tracePath += `<g><rect x="${CX.produce - 40}" y="${ty - 17}" width="80" height="34" rx="9" fill="var(--card)" stroke="${GOLD}" stroke-width="2.5"/>
       <text x="${CX.produce}" y="${ty + 5}" text-anchor="middle" font-size="13" font-weight="700">📨 한 건</text><title>${esc(tr.id)}</title></g>`;
