@@ -52,7 +52,7 @@ services:
     volumes: [broker-3:/data]
 
   # 생산자 2개 = 토픽 2개. 자동으로 보내지 않고 대시보드 버튼을 받을 때만 보낸다.
-  # 버퍼: 파티션별 묶음이 5건이 되거나 10초가 지나면 리더에게 한 번에 보낸다
+  # 버퍼: 파티션별 묶음이 5건이 차면 리더에게 한 번에 보낸다 (시간으로는 안 보냄. 덜 찬 묶음은 대시보드 "지금 보내기")
   producer-logs:
     <<: *demo
     environment:
@@ -66,7 +66,7 @@ services:
       DEMO_ACKS: "1"
       DEMO_MIN_INSYNC_REPLICAS: "1"
       DEMO_BATCH_SIZE: "5"
-      DEMO_LINGER_MS: "10000"
+      DEMO_LINGER_MS: "0"
 
   producer-orders:
     <<: *demo
@@ -81,7 +81,7 @@ services:
       DEMO_ACKS: all
       DEMO_MIN_INSYNC_REPLICAS: "2"
       DEMO_BATCH_SIZE: "5"
-      DEMO_LINGER_MS: "10000"
+      DEMO_LINGER_MS: "0"
 
   # 소비자 그룹 search 3명 → logs 파티션 3개를 1개씩
   # 처리 후 커밋(최소 한 번). gap 이 생기면 = ACK 를 받았는데 사라진 메시지

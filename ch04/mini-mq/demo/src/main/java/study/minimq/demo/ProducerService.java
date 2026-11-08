@@ -34,7 +34,8 @@ import study.minimq.common.TopicInfo;
  * 생산자 하나 = 토픽 하나. 자동으로 보내지 않고, 대시보드 버튼(POST /send)을 받을 때만 보낸다.
  *
  * <p>클라이언트 라이브러리 그대로다 (그림 4.12): 보낸 메시지는 🧺 버퍼의 파티션별 묶음에 쌓이고,
- * 묶음이 batchSize(5)건이 되거나 lingerMs(10초)가 지나면 🧭 라우팅이 지도에서 리더를 찾아 한 번에 보낸다.
+ * 묶음이 batchSize(5)건이 되면 🧭 라우팅이 지도에서 리더를 찾아 한 번에 보낸다. 시간으로는 보내지 않는다(lingerMs 0).
+ * 덜 찬 묶음은 대시보드의 "지금 보내기"(POST /flush)로 내보낸다.
  * 보내는 메시지는 키가 trace- 로 시작해서, 생산자 안에서 일어난 단계를 브로커의 추적 기록에 남긴다.
  */
 @RestController
@@ -74,7 +75,8 @@ class ProducerService {
                 public void buffered(String key, TopicPartition tp, int partitions, int batchSizeNow) {
                     event(key, "buffered", "🧺 " + name + " 버퍼: hash(key) % " + partitions + " = 파티션 " + tp.partition()
                             + " → " + tp.topic() + "-" + tp.partition() + " 묶음에 담음 (" + batchSizeNow + "/" + props.batchSize()
-                            + "건, " + props.batchSize() + "건이 차거나 " + props.lingerMs() / 1000 + "초가 지나면 보냄)");
+                            + "건, " + (props.lingerMs() > 0 ? props.batchSize() + "건이 차거나 " + props.lingerMs() / 1000 + "초가 지나면 보냄)"
+                            : props.batchSize() + "건이 차면 보냄)"));
                 }
 
                 @Override
@@ -120,6 +122,17 @@ class ProducerService {
             });
         }
         return Map.of("producer", name, "topic", props.topic(), "ids", ids);
+    }
+
+    /** 대시보드 버튼: 덜 찬 묶음도 지금 보낸다. */
+    @PostMapping("/flush")
+    public Map<String, Object> flush() {
+        Producer p = producer;
+        if (p == null) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "토픽을 준비하는 중");
+        int n = p.buffered().stream().mapToInt(b -> b.keys().size()).sum();
+        p.flush();
+        log.info("{} 지금 보내기: 버퍼의 {}건", name, n);
+        return Map.of("producer", name, "flushed", n);
     }
 
     /** 대시보드용: 버퍼에 모여 있는 묶음, 캐시한 지도. */

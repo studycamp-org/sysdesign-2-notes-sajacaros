@@ -73,7 +73,7 @@
 <main>
   <section class="card">
     <div class="sendbar" id="sendbar"></div>
-    <div id="banner"><span class="muted">위 버튼으로 메시지를 보내면 그 한 건이 지나가는 단계를 천천히 보여 준다. 생산자는 같은 파티션 묶음이 5건이 차거나 10초가 지나야 실제로 보낸다.</span></div>
+    <div id="banner"><span class="muted">위 버튼으로 메시지를 보내면 그 한 건이 지나가는 단계를 천천히 보여 준다. 생산자는 같은 파티션 묶음이 5건 차야 실제로 보낸다 (덜 찬 묶음은 "지금 보내기").</span></div>
     <div class="flowwrap">
       <svg id="flow" viewBox="0 0 1160 600" role="img" aria-label="생산자 → 브로커(파티션 사본) → 소비자 그룹"></svg>
       <svg id="overlay" viewBox="0 0 1160 600" aria-hidden="true"></svg>
@@ -157,6 +157,11 @@ async function sendFrom(name, count) {
   } catch (e) { banner(null, `${name} 에 보내기 실패`, 'ctrl'); }
 }
 
+async function flushFrom(name) {
+  await fetch(`/admin/producers/${encodeURIComponent(name)}/flush`, {method: 'POST'}).catch(() => {});
+  refresh();
+}
+
 function tools(nodes) {
   document.getElementById('tools').innerHTML = nodes.map(n => {
     const d = n.replicationDelayMs || 0, iso = n.reachable && n.raft.isolated;
@@ -172,7 +177,8 @@ function sendbar(s) {
   const el = document.getElementById('sendbar');
   const html = (s.producers || []).map(p => `<span class="grp">📨 <b>${esc(p.name)}</b> → ${esc(p.topic || '?')} (acks=${esc(p.acks || '?')})
       <button class="send" ${p.reachable && p.ready ? '' : 'disabled'} onclick="sendFrom('${esc(p.name)}', 1)">1건</button>
-      <button class="send" ${p.reachable && p.ready ? '' : 'disabled'} onclick="sendFrom('${esc(p.name)}', 5)" title="같은 파티션 묶음이 차면 바로 나간다">5건</button></span>`).join('');
+      <button class="send" ${p.reachable && p.ready ? '' : 'disabled'} onclick="sendFrom('${esc(p.name)}', 5)">5건</button>
+      <button ${p.reachable && p.ready ? '' : 'disabled'} onclick="flushFrom('${esc(p.name)}')" title="덜 찬 묶음도 지금 리더에게 보낸다">지금 보내기</button></span>`).join('');
   if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
 }
 
@@ -185,7 +191,8 @@ function traceOf(s) {
     .sort((a, b) => a.at - b.at || (a.broker === b.broker ? a.seq - b.seq : 0));
   const seen = new Set();
   const all = events.filter(e => { const k = e.step + '|' + e.who; if (seen.has(k)) return false; seen.add(k); return true; });
-  const done = all.some(e => e.step === 'committed' || e.step === 'failed') || (all.length && Date.now() - all[0].at > 30000);
+  const done = all.some(e => e.step === 'committed' || e.step === 'failed')
+    || (all.length && all.at(-1).step !== 'buffered' && Date.now() - all.at(-1).at > 30000);
   return {id: currentTrace, t, all, events: all, done, key: t ? `${t.topic}-${t.partition}` : null,
     has: (step, who) => all.some(e => e.step === step && (who === undefined || e.who === who))};
 }
@@ -215,7 +222,7 @@ function stepNext(manual) {
   if (replay.k >= tr.all.length) {
     if (tr.done) { replay.playing = false; banner(null, `끝: ${tr.all.length}단계, 실제로는 ${tr.all.at(-1).at - tr.all[0].at}ms 걸렸다`, 'data'); return; }
     const last = tr.all.at(-1);
-    if (last && last.step === 'buffered') banner(null, '⏳ 생산자 버퍼에서 기다리는 중: 같은 파티션 묶음이 5건이 차거나 10초가 지나면 보낸다', 'data');
+    if (last && last.step === 'buffered') banner(null, '⏳ 생산자 버퍼에서 기다리는 중: 같은 파티션 묶음이 5건이 차면 보낸다 (지금 보내려면 "지금 보내기")', 'data');
     if (replay.playing || manual) replay.timer = setTimeout(() => stepNext(manual), 400);
     return;
   }
@@ -376,7 +383,7 @@ function draw(s) {
       <text x="${x0 + QW - 12}" y="${qy + 21}" text-anchor="end" font-size="11.5" fill="var(--muted)">→ ${esc(pr.topic)} · acks=${esc(pr.acks)}</text>
       <rect x="${x0 + 10}" y="${bufY}" width="${QW - 20}" height="${bufH}" rx="8" fill="var(--bg)" stroke="var(--line)"/>
       <text x="${x0 + 20}" y="${bufY + 17}" font-size="12" font-weight="700">🧺 버퍼</text>
-      <text x="${x0 + 20}" y="${bufY + 32}" font-size="10.5" fill="var(--muted)">hash(key) % ${nparts} → 파티션별 묶음 · ${batch}건 차거나 ${(pr.lingerMs || 0) / 1000}초 뒤 보냄</text>`;
+      <text x="${x0 + 20}" y="${bufY + 32}" font-size="10.5" fill="var(--muted)">hash(key) % ${nparts} → 파티션별 묶음 · ${batch}건이 차면 보냄${pr.lingerMs > 0 ? ` (또는 ${pr.lingerMs / 1000}초 뒤)` : ''}</text>`;
     const buf = {};
     (pr.buffer || []).forEach(bb => { buf[bb.partition] = bb; });
     for (let p = 0; p < nparts; p++) {
@@ -390,8 +397,8 @@ function draw(s) {
         if (mine) SEG.buffered = [cx + SLOT / 2, ry + SLOT / 2];
       }
       if (bb) {
-        const left = Math.max(0, ((pr.lingerMs || 0) - bb.ageMs) / 1000);
-        front += `<text x="${x0 + 46 + batch * (SLOT + 4) + 6}" y="${ry + 12}" font-size="11" fill="var(--muted)">${keys.length}/${batch} · ${left.toFixed(1)}초 뒤 보냄</text>`;
+        const when = pr.lingerMs > 0 ? ` · ${Math.max(0, (pr.lingerMs - bb.ageMs) / 1000).toFixed(1)}초 뒤 보냄` : ` · ${batch - keys.length}건 더 차면 보냄`;
+        front += `<text x="${x0 + 46 + batch * (SLOT + 4) + 6}" y="${ry + 12}" font-size="11" fill="var(--muted)">${keys.length}/${batch}${when}</text>`;
       }
     }
     if (!SEG.buffered && mineTopic) SEG.buffered = [x0 + 46 + 2 * (SLOT + 4), bufY + 39 + tr.t.partition * 22 + SLOT / 2];
@@ -515,7 +522,7 @@ function traceView(s, tr) {
   }).join('');
   if (!replay.on && !tr.done) {
     const last = all.at(-1);
-    rows += `<tr class="wait"><td>…</td><td>${last && last.step === 'buffered' ? '생산자 버퍼에서 기다리는 중 (묶음 5건 또는 10초)' : '다음 단계를 기다리는 중'}</td></tr>`;
+    rows += `<tr class="wait"><td>…</td><td>${last && last.step === 'buffered' ? '생산자 버퍼에서 기다리는 중 (묶음이 5건 차면 보냄, 또는 "지금 보내기")' : '다음 단계를 기다리는 중'}</td></tr>`;
   }
   body.innerHTML = rows || '<tr class="wait"><td></td><td>기록을 모으는 중…</td></tr>';
 }

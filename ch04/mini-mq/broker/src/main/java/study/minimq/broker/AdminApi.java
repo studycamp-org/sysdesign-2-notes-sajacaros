@@ -148,6 +148,14 @@ public class AdminApi {
         return new MiniMqHttp(url).post("/send?count=" + count, Map.of(), Map.class, Duration.ofSeconds(5));
     }
 
+    /** 대시보드 버튼: 그 생산자의 덜 찬 묶음을 지금 보낸다. */
+    @PostMapping("/admin/producers/{name}/flush")
+    public Object producerFlush(@org.springframework.web.bind.annotation.PathVariable String name) throws IOException {
+        String url = props.producerUrls().get(name);
+        if (url == null) throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND, "없는 생산자");
+        return new MiniMqHttp(url).post("/flush", Map.of(), Map.class, Duration.ofSeconds(5));
+    }
+
     /** 생산자가 자기 안에서 일어난 단계(지도·버퍼·라우팅·ACK)를 남긴다. */
     public record ClientEvent(String trace, String step, String who, String text, long at, long seq) {
     }

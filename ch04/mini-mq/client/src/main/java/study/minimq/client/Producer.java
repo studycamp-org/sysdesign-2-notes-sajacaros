@@ -69,9 +69,12 @@ public final class Producer implements AutoCloseable {
     public Producer(Config cfg) {
         this.cfg = cfg;
         this.view = new ClusterView(cfg.bootstrap());
-        // linger 가 지난 묶음을 찾는 주기. 길게 잡으면(예전엔 linger/2) 10초 linger 가 최대 15초가 된다
-        long period = Math.max(1, Math.min(200, cfg.lingerMs() / 2));
-        ticker.scheduleAtFixedRate(this::flushLingered, period, period, TimeUnit.MILLISECONDS);
+        // lingerMs <= 0 이면 시간으로는 보내지 않는다: 묶음이 batchSize 만큼 차거나 flush() 를 불러야 보낸다
+        if (cfg.lingerMs() > 0) {
+            // linger 가 지난 묶음을 찾는 주기. 길게 잡으면(예전엔 linger/2) 10초 linger 가 최대 15초가 된다
+            long period = Math.max(1, Math.min(200, cfg.lingerMs() / 2));
+            ticker.scheduleAtFixedRate(this::flushLingered, period, period, TimeUnit.MILLISECONDS);
+        }
     }
 
     /** 버퍼에 넣고 바로 돌아온다. future 는 브로커가 붙인 오프셋으로 완료된다 (ACK=0 이면 -1). */
