@@ -48,11 +48,24 @@ public final class ClusterView {
         meta = null;
     }
 
+    /** 방금 만든 토픽은 팔로워 브로커의 메타데이터에 박동 한 번(≤0.5초) 늦게 나타나므로 잠깐 기다린다. */
     public int partitions(String topic) throws IOException {
         TopicMetadata t = metadata().topics().get(topic);
-        if (t == null) t = refresh().topics().get(topic);
+        for (int i = 0; t == null && i < 10; i++) {
+            if (i > 0) sleep(200);
+            t = refresh().topics().get(topic);
+        }
         if (t == null) throw new IOException("없는 토픽: " + topic);
         return t.partitions().size();
+    }
+
+    private static void sleep(long ms) throws IOException {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException(e);
+        }
     }
 
     /** 파티션 리더 브로커에 붙은 클라이언트. */

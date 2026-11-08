@@ -19,43 +19,34 @@ import com.fasterxml.jackson.core.type.TypeReference;
 
 import study.minimq.broker.raft.RaftNode;
 import study.minimq.client.MiniMqHttp;
-import study.minimq.common.OffsetCommit;
 
 /** 대시보드용. 고립 실험 중에도 열려 있다. */
 @RestController
 public class AdminApi {
     private final BrokerProperties props;
     private final RaftNode raft;
-    private final LogManager logs;
+    private final ReplicaManager replicas;
     private final OffsetStore offsets;
+    private final Traffic traffic;
     private final ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor();
 
-    public AdminApi(BrokerProperties props, RaftNode raft, LogManager logs, OffsetStore offsets) {
+    public AdminApi(BrokerProperties props, RaftNode raft, ReplicaManager replicas, OffsetStore offsets, Traffic traffic) {
+        this.traffic = traffic;
         this.props = props;
         this.raft = raft;
-        this.logs = logs;
+        this.replicas = replicas;
         this.offsets = offsets;
     }
 
-    /** 이 브로커 하나의 상태: Raft 상태 + 들고 있는 파티션 + 그 파티션의 그룹 오프셋. */
+    /** 이 브로커 하나의 상태: Raft 상태 + 가진 사본들 + 코디네이터로서 맡은 그룹 오프셋. */
     @GetMapping("/admin/node")
     public Map<String, Object> node() {
-        List<Map<String, Object>> groups = new ArrayList<>();
-        for (OffsetCommit c : offsets.all()) {
-            if (!logs.isLeader(c.topic(), c.partition())) continue;
-            long leo = logs.log(c.topic(), c.partition()).logEndOffset();
-            Map<String, Object> g = new LinkedHashMap<>();
-            g.put("group", c.group());
-            g.put("topic", c.topic());
-            g.put("partition", c.partition());
-            g.put("committed", c.offset());
-            g.put("lag", Math.max(0, leo - 1 - c.offset()));
-            groups.add(g);
-        }
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("raft", raft.state());
-        out.put("partitions", logs.states());
-        out.put("groups", groups);
+        out.put("replicationDelayMs", replicas.replicationDelayMs());
+        out.put("replicas", replicas.states());
+        out.put("offsets", offsets.all());
+        out.put("traffic", traffic.snapshot());
         return out;
     }
 
@@ -93,11 +84,43 @@ public class AdminApi {
         return Map.of("id", props.brokerId(), "isolated", on);
     }
 
-    /** 대시보드가 다른 브로커를 고립시키거나 풀 때. */
-    @PostMapping("/admin/cluster/isolate")
-    public Object isolateOther(@RequestParam int id, @RequestParam boolean on) throws IOException {
-        if (id == props.brokerId()) return isolate(on);
+    /** 팔로워로서 가져가기 전에 쉰다 → 뒤처진다 → ISR 에서 빠지거나, ACK=all 이 느려진다. */
+    @PostMapping("/admin/slow")
+    public Map<String, Object> slow(@RequestParam long ms) {
+        replicas.setReplicationDelayMs(ms);
+        return Map.of("id", props.brokerId(), "replicationDelayMs", ms);
+    }
+
+    /**
+     * 프로세스를 바로 죽인다. 컨테이너는 곧바로 다시 띄우지만 downSec 동안은 일어나지 않고 기다린다
+     * (BrokerApplication.main). 컨트롤러가 죽음을 알아채고 리더를 옮기는 걸 보려고.
+     */
+    @PostMapping("/admin/crash")
+    public Map<String, Object> crash(@RequestParam(defaultValue = "15") int downSec) throws IOException {
+        java.nio.file.Files.writeString(java.nio.file.Path.of(props.dataDir()).resolve(BrokerApplication.DOWN_UNTIL),
+                Long.toString(System.currentTimeMillis() + downSec * 1000L));
+        raft.note("💥 강제 종료 (" + downSec + "초 동안 꺼져 있음)");
+        Thread.ofVirtual().start(() -> {
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException ignored) {
+            }
+            Runtime.getRuntime().halt(1);
+        });
+        return Map.of("id", props.brokerId(), "crash", true);
+    }
+
+    /** 대시보드가 다른 브로커에 실험 명령을 보낼 때: action = isolate | slow | crash. */
+    @PostMapping("/admin/cluster/{action}")
+    public Object forward(@org.springframework.web.bind.annotation.PathVariable String action,
+                          @RequestParam int id, @RequestParam(required = false) String value) throws IOException {
+        String query = switch (action) {
+            case "isolate" -> "/admin/isolate?on=" + value;
+            case "slow" -> "/admin/slow?ms=" + value;
+            case "crash" -> "/admin/crash";
+            default -> throw new IllegalArgumentException(action);
+        };
         String url = raft.members().get(id);
-        return new MiniMqHttp(url).post("/admin/isolate?on=" + on, Map.of(), Map.class, Duration.ofSeconds(2));
+        return new MiniMqHttp(url).post(query, Map.of(), Map.class, Duration.ofSeconds(2));
     }
 }

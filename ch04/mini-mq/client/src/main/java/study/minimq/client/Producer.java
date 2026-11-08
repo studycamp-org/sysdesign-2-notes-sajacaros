@@ -28,7 +28,7 @@ import study.minimq.common.ProduceResponse;
  *       묶음이 크면 대역폭이 늘고, 모으는 시간만큼 지연이 는다 (그림 4.13)</li>
  *   <li>순서: 파티션마다 전송 스레드를 하나만 둔다. 앞 묶음의 응답(재시도 포함)이 끝나야
  *       다음 묶음을 보내므로, 재시도해도 파티션 안 순서가 뒤집히지 않는다</li>
- *   <li>ACK=0 이면 응답을 기다리지도, 재시도하지도 않는다</li>
+ *   <li>acks: 0 = 응답을 기다리지도 재시도하지도 않음, 1 = 리더 저장 후 응답, -1(all) = ISR 전원 복제 후 응답</li>
  *   <li>라우팅: 메타데이터(지도)를 보고 파티션 리더 브로커로 바로 보낸다. 실패하면 지도를 버리고 다시 받는다</li>
  * </ul>
  */
@@ -52,6 +52,8 @@ public final class Producer implements AutoCloseable {
     private final AtomicLong sentBatches = new AtomicLong();
     private final AtomicLong failedRecords = new AtomicLong();
     private final AtomicLong retries = new AtomicLong();
+    private final AtomicLong inflight = new AtomicLong();
+    private long latencySum, latencyCount, latencyMax; // this 로 보호, stats() 때마다 초기화
 
     public Producer(Config cfg) {
         this.cfg = cfg;
@@ -66,6 +68,8 @@ public final class Producer implements AutoCloseable {
         int p = key == null ? (int) Math.floorMod(roundRobin.getAndIncrement(), (long) n) : Partitioner.forKey(key, n);
         TopicPartition tp = new TopicPartition(topic, p);
         CompletableFuture<Long> f = new CompletableFuture<>();
+        inflight.incrementAndGet();
+        f.whenComplete((x, e) -> inflight.decrementAndGet());
         synchronized (this) {
             Batch b = batches.computeIfAbsent(tp, Batch::new);
             b.add(new ProduceRecord(key, value, System.currentTimeMillis()), f);
@@ -115,9 +119,10 @@ public final class Producer implements AutoCloseable {
             return;
         }
         IOException last = null;
-        for (int attempt = 0; attempt <= cfg.retries(); attempt++) {
+        for (int attempt = 0; attempt <= cfg.retries() && !Thread.currentThread().isInterrupted(); attempt++) {
             try {
                 ProduceResponse res = view.leader(b.tp.topic(), b.tp.partition()).post("/produce", req, ProduceResponse.class);
+                recordLatency(System.currentTimeMillis() - b.createdAt);
                 for (int i = 0; i < b.futures.size(); i++) b.futures.get(i).complete(res.baseOffset() + i);
                 sentBatches.incrementAndGet();
                 sentRecords.addAndGet(b.records.size());
@@ -128,7 +133,7 @@ public final class Producer implements AutoCloseable {
                 last = e;
                 view.invalidate();
                 retries.incrementAndGet();
-                sleep(100L << Math.min(attempt, 5)); // 지수형 백오프
+                sleep(Math.min(1_000, 100L << Math.min(attempt, 5))); // 지수형 백오프 (최대 1초)
             }
         }
         failedRecords.addAndGet(b.records.size());
@@ -145,11 +150,21 @@ public final class Producer implements AutoCloseable {
         });
     }
 
-    public String stats() {
-        return "sent=%d batches=%d (평균 %.1f건/묶음) retries=%d failed=%d".formatted(
-                sentRecords.get(), sentBatches.get(),
+    private synchronized void recordLatency(long ms) {
+        latencySum += ms;
+        latencyCount++;
+        latencyMax = Math.max(latencyMax, ms);
+    }
+
+    /** 누적 숫자 + 지난 stats() 이후 묶음의 응답 지연(평균·최대). */
+    public synchronized String stats() {
+        String s = "sent=%d 묶음당 %.1f건 ack지연 평균 %dms 최대 %dms 대기=%d retries=%d failed=%d".formatted(
+                sentRecords.get(),
                 sentBatches.get() == 0 ? 0.0 : (double) sentRecords.get() / sentBatches.get(),
-                retries.get(), failedRecords.get());
+                latencyCount == 0 ? 0 : latencySum / latencyCount, latencyMax,
+                inflight.get(), retries.get(), failedRecords.get());
+        latencySum = latencyCount = latencyMax = 0;
+        return s;
     }
 
     @Override

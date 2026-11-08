@@ -15,6 +15,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import study.minimq.client.Consumer;
+import study.minimq.client.MiniMqHttp;
 import study.minimq.common.Message;
 
 /**
@@ -39,6 +40,7 @@ class ConsumerRunner implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) throws Exception {
+        MiniMqHttp.setClientId("consumer-" + props.group());
         Startup.waitForTopic(props.bootstrap(), props.topic());
         boolean commitBefore = "before".equalsIgnoreCase(props.commitMode());
         Consumer.Config cfg = new Consumer.Config(props.bootstrap(), props.group(), props.topic(),
@@ -100,8 +102,8 @@ class ConsumerRunner implements ApplicationRunner {
                         long now = System.currentTimeMillis();
                         if (now - lastReport >= 5_000) {
                             double rate = sinceReport * 1000.0 / (now - lastReport);
-                            log.info("[consumer {}] consumed={} ({}/s) lag={} gap={} dup={} crash={} badCrc={}{}",
-                                    props.group(), consumed, Math.round(rate), consumer.lag(), gaps, dups, crashes, badCrc,
+                            log.info("[consumer {} {}] consumed={} ({}/s) lag={} gap={} dup={} crash={} badCrc={}{}",
+                                    props.group(), props.topic(), consumed, Math.round(rate), consumer.lag(), gaps, dups, crashes, badCrc,
                                     consumer.unavailable().isEmpty() ? "" : " 리더없음=" + consumer.unavailable());
                             lastReport = now;
                             sinceReport = 0;

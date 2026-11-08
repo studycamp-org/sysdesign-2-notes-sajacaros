@@ -9,6 +9,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * 환경 변수로 바꾼다. 예) DEMO_ROLE=consumer DEMO_GROUP=search DEMO_COMMIT_MODE=before
  *
  * @param role        producer | consumer
+ * @param acks        0 | 1 | all
+ * @param minInsyncReplicas 토픽을 만들 때 최소 ISR (ACK=all 이 이보다 ISR 이 적으면 거부된다)
  * @param servers     로그를 보내는 가상 서버 수 (키 = server-NN)
  * @param ratePerSec  초당 생산 건수
  * @param commitMode  before = 처리 전 커밋(최대 한 번) / after = 처리 후 커밋(최소 한 번)
@@ -27,7 +29,9 @@ public record DemoProperties(
         @DefaultValue("200") int ratePerSec,
         @DefaultValue("50") int batchSize,
         @DefaultValue("20") long lingerMs,
-        @DefaultValue("1") int acks,
+        @DefaultValue("1") String acks,
+        @DefaultValue("3") int replicationFactor,
+        @DefaultValue("1") int minInsyncReplicas,
         @DefaultValue("search") String group,
         @DefaultValue("after") String commitMode,
         @DefaultValue("0") long processMs,
@@ -35,4 +39,8 @@ public record DemoProperties(
         @DefaultValue("1000") long waitMs,
         @DefaultValue("0") long crashEverySec,
         List<Integer> partitions) {
+
+    public int acksValue() {
+        return "all".equalsIgnoreCase(acks) ? -1 : Integer.parseInt(acks);
+    }
 }

@@ -80,7 +80,7 @@ class RaftNodeTest {
     }
 
     private static ClusterMetadata withTopic(ClusterMetadata m, String name) {
-        return m.withTopic(new TopicMetadata(name, List.of(new PartitionMetadata(0, 1))));
+        return m.withTopic(new TopicMetadata(name, List.of(new PartitionMetadata(0, 1, 0, List.of(1), List.of(1))), 1, 1));
     }
 
     @Test
@@ -160,7 +160,7 @@ class RaftNodeTest {
     void 메타데이터가_뒤처진_후보는_표를_못_받는다() {
         RaftNode n1 = nodes.get(1);
         // n1 은 term 5 에 v3 을 가졌다고 하자. 후보는 term 6 이지만 v1(term 2) 만 가졌다
-        n1.handleAppend(new AppendRequest(5, 2, ClusterMetadata.initial(Map.of(1, "n1", 2, "n2", 3, "n3")).withVersion(3, 5), 0));
+        n1.handleAppend(new AppendRequest(5, 2, ClusterMetadata.initial(Map.of(1, "n1", 2, "n2", 3, "n3")).withVersion(3, 5), 0, null));
         VoteResponse r = n1.handleVote(new VoteRequest(6, 3, 2, 1));
         assertThat(r.granted()).isFalse();
         assertThat(r.term()).isEqualTo(6);
@@ -169,6 +169,21 @@ class RaftNodeTest {
         assertThat(n1.handleVote(new VoteRequest(6, 2, 5, 3)).granted()).isTrue();
         // 같은 term 에 두 번은 안 준다
         assertThat(n1.handleVote(new VoteRequest(6, 3, 5, 3)).granted()).isFalse();
+    }
+
+    @Test
+    void 변경이_쉬지_않고_들어와도_팔로워가_커밋을_따라온다() {
+        runUntil(() -> leaders().size() == 1);
+        RaftNode leader = leaders().get(0);
+        runUntil(() -> leader.committed().controllerId() == leader.id());
+        // 박동마다 새 변경을 넣어 팔로워가 받는 스냅샷이 항상 커밋보다 앞서게 만든다
+        for (int i = 0; i < 50; i++) {
+            int n = i;
+            leader.propose(m -> withTopic(m, "t" + n));
+            now.addAndGet(60);
+            nodes.values().forEach(RaftNode::tick);
+        }
+        assertThat(nodes.values()).allMatch(n -> n.committed().version() >= leader.committed().version() - 2);
     }
 
     static final class MemoryStorage implements RaftStorage {

@@ -15,6 +15,9 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param electionMaxMs   선거 타임아웃 상한. 노드마다 무작위로 골라 동시에 출마하는 일을 줄인다
  * @param heartbeatMs     리더(컨트롤러)의 박동 주기
  * @param brokerDeadMs    컨트롤러가 이 시간 동안 응답을 못 받으면 그 브로커를 죽음으로 표시한다
+ * @param replicaLagMaxMessages 리더보다 이만큼 넘게 뒤처지면 ISR 에서 뺀다 (교재 replica.lag.max.messages)
+ * @param replicaLagTimeMs      이 시간 동안 가져가러 오지 않아도 ISR 에서 뺀다 (카프카 replica.lag.time.max.ms)
+ * @param ackTimeoutMs          ACK=all 생산자가 ISR 전원의 복제를 기다리는 최대 시간
  */
 @ConfigurationProperties(prefix = "minimq")
 public record BrokerProperties(
@@ -27,7 +30,10 @@ public record BrokerProperties(
         @DefaultValue("1500") long electionMinMs,
         @DefaultValue("3000") long electionMaxMs,
         @DefaultValue("500") long heartbeatMs,
-        @DefaultValue("3000") long brokerDeadMs) {
+        @DefaultValue("3000") long brokerDeadMs,
+        @DefaultValue("1000") long replicaLagMaxMessages,
+        @DefaultValue("4000") long replicaLagTimeMs,
+        @DefaultValue("5000") long ackTimeoutMs) {
 
     public Map<Integer, String> members() {
         Map<Integer, String> m = new TreeMap<>();

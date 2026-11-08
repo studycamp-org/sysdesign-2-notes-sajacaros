@@ -48,6 +48,10 @@ public record ClusterMetadata(
         return new ClusterMetadata(version, term, controllerId, controllerEpoch, brokers, m);
     }
 
+    public ClusterMetadata withPartition(String topic, PartitionMetadata p) {
+        return withTopic(topics.get(topic).withPartition(p));
+    }
+
     public Optional<PartitionMetadata> partition(String topic, int partition) {
         TopicMetadata t = topics.get(topic);
         if (t == null || partition < 0 || partition >= t.partitions().size()) return Optional.empty();
@@ -56,6 +60,7 @@ public record ClusterMetadata(
 
     /** 파티션 리더 브로커의 주소. 없으면 null. */
     public String leaderUrl(String topic, int partition) {
-        return partition(topic, partition).map(p -> brokers.get(p.leader())).map(BrokerInfo::url).orElse(null);
+        return partition(topic, partition).filter(p -> p.leader() >= 0)
+                .map(p -> brokers.get(p.leader())).map(BrokerInfo::url).orElse(null);
     }
 }

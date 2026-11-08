@@ -125,7 +125,7 @@ public final class RaftNode {
             if (role == Role.LEADER) {
                 if (now < nextHeartbeat) return;
                 nextHeartbeat = now + timing.heartbeatMs();
-                appendReq = new AppendRequest(currentTerm, id, accepted, committed.version());
+                appendReq = new AppendRequest(currentTerm, id, accepted, committed.version(), committed);
             } else {
                 if (now < electionDeadline) return;
                 startElection();
@@ -240,7 +240,11 @@ public final class RaftNode {
             accepted = r.metadata(); // 리더의 스냅샷이 이번 term 의 정답이다
             persist();
         }
-        if (r.commitVersion() >= accepted.version() && !committed.equals(accepted)) commit(accepted);
+        if (r.commitVersion() >= accepted.version() && !committed.equals(accepted)) {
+            commit(accepted);
+        } else if (r.committed() != null && r.committed().version() > committed.version()) {
+            commit(r.committed());
+        }
         return new AppendResponse(currentTerm, true, accepted.version());
     }
 

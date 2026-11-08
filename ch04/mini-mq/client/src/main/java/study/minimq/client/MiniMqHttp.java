@@ -31,6 +31,18 @@ public final class MiniMqHttp {
         }
     }
 
+    /** 브로커 대시보드가 "누가 보냈는지" 그릴 수 있게 모든 요청에 붙는 이름. 예) producer-logs, consumer-search */
+    private static volatile String clientId;
+
+    public static void setClientId(String id) {
+        clientId = id;
+    }
+
+    private static HttpRequest.Builder tag(HttpRequest.Builder b) {
+        String id = clientId;
+        return id == null ? b : b.header("X-MiniMq-Client", id);
+    }
+
     public String base() {
         return base;
     }
@@ -40,7 +52,7 @@ public final class MiniMqHttp {
     }
 
     public <T> T get(String path, TypeReference<T> type, Duration timeout) throws IOException {
-        HttpRequest req = HttpRequest.newBuilder(URI.create(base + path)).timeout(timeout).GET().build();
+        HttpRequest req = tag(HttpRequest.newBuilder(URI.create(base + path))).timeout(timeout).GET().build();
         return Json.MAPPER.readValue(send(req), type);
     }
 
@@ -59,7 +71,7 @@ public final class MiniMqHttp {
     }
 
     private HttpRequest postRequest(String path, Object body, Duration timeout) throws IOException {
-        return HttpRequest.newBuilder(URI.create(base + path))
+        return tag(HttpRequest.newBuilder(URI.create(base + path)))
                 .timeout(timeout)
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofByteArray(Json.MAPPER.writeValueAsBytes(body)))

@@ -3,171 +3,298 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>mini-mq 클러스터</title>
+<title>mini-mq</title>
 <style>
   :root {
     --bg: #faf7f2; --card: #ffffff; --ink: #2b2620; --muted: #8a8177; --line: #e6dfd5;
-    --seg: #d9cfc2; --accent: #b5452f; --ok: #3f7d4e; --warn: #c07a12; --bad: #b3261e;
+    --accent: #b5452f; --ok: #3f7d4e; --warn: #c07a12; --bad: #b3261e;
+    --route: #7a4fb0; --commit: #3f7d4e; --beat: #c99a1e; --data: #b5452f;
     --b1: #2f6db5; --b2: #3f7d4e; --b3: #8a4fb0;
   }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #1d1a17; --card: #26221e; --ink: #ece6dd; --muted: #a39a8f; --line: #3a342e; --seg: #4a433b;
-            --accent: #e0664d; --ok: #6bbf7f; --warn: #e2a33d; --bad: #f2776d; --b1: #6ea4e6; --b2: #6bbf7f; --b3: #c08be0; }
+    :root { --bg: #1d1a17; --card: #26221e; --ink: #ece6dd; --muted: #a39a8f; --line: #3a342e;
+            --accent: #e0664d; --ok: #6bbf7f; --warn: #e2a33d; --bad: #f2776d;
+            --route: #b48be0; --commit: #6bbf7f; --beat: #e6c25a; --data: #e0664d;
+            --b1: #6ea4e6; --b2: #6bbf7f; --b3: #c08be0; }
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif; }
-  header { padding: 14px 20px; border-bottom: 1px solid var(--line); display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; }
-  h1 { font-size: 18px; margin: 0; }
-  .meta { color: var(--muted); font-size: 13px; }
-  main { padding: 16px 20px; display: grid; gap: 22px; max-width: 1400px; }
-  h2 { font-size: 15px; margin: 0 0 8px; }
-  .hint { font-size: 12px; color: var(--muted); margin: 0 0 8px; }
-  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
-  .card h3 { margin: 0 0 6px; font-size: 14px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-  .nums { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-  .badge { font-size: 11px; padding: 1px 7px; border-radius: 10px; border: 1px solid currentColor; white-space: nowrap; }
-  .LEADER { color: var(--accent); font-weight: 700; }
-  .CANDIDATE { color: var(--warn); font-weight: 600; }
-  .FOLLOWER { color: var(--muted); }
-  .down { opacity: .55; }
-  .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 13px; font-variant-numeric: tabular-nums; margin: 6px 0; }
-  .kv span:nth-child(odd) { color: var(--muted); }
-  button { font: inherit; font-size: 12px; padding: 3px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer; }
+  header { padding: 10px 20px; border-bottom: 1px solid var(--line); display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  h1 { font-size: 17px; margin: 0; }
+  .muted { color: var(--muted); font-size: 13px; }
+  main { padding: 12px 20px 30px; display: grid; gap: 16px; max-width: 1240px; }
+  h2 { font-size: 13px; margin: 0 0 6px; color: var(--muted); font-weight: 600; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .tools { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; }
+  .tool { display: flex; gap: 6px; align-items: center; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+  button { font: inherit; font-size: 12px; padding: 2px 9px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer; }
   button:hover { border-color: var(--accent); }
-  .bar { display: flex; gap: 2px; height: 20px; margin: 8px 0 4px; }
-  .seg { background: var(--seg); border-radius: 3px; min-width: 6px; }
-  .seg.active { background: var(--accent); }
-  .lead { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
+  button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  svg { width: 100%; height: auto; display: block; }
+  svg text { fill: var(--ink); font-family: inherit; }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .legend i { display: inline-block; width: 22px; height: 0; border-top: 3px solid; vertical-align: middle; margin-right: 4px; }
+  @keyframes flow { to { stroke-dashoffset: -28; } }
+  .anim { animation: flow linear infinite; }
   table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); font-size: 13px; }
   th { color: var(--muted); font-weight: 500; font-size: 12px; }
-  .events td { font-size: 13px; }
-  .events td:first-child, .events td:nth-child(2), .events td:nth-child(3) { white-space: nowrap; color: var(--muted); }
-  .lag0 { color: var(--ok); } .lagHi { color: var(--warn); font-weight: 600; }
-  .dead { color: var(--bad); font-weight: 600; }
-  .empty { color: var(--muted); }
-  .twocol { display: grid; gap: 22px; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
-  @media (max-width: 900px) { .twocol { grid-template-columns: 1fr; } }
+  td.num, th.num { text-align: right; }
+  .events td:first-child { white-space: nowrap; color: var(--muted); width: 1%; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  .bad { color: var(--bad); font-weight: 600; }
+  .two { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  @media (max-width: 900px) { .two { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
 <header>
-  <h1>mini-mq 클러스터</h1>
-  <span class="meta" id="summary"></span>
-  <span class="meta" id="updated"></span>
+  <h1>mini-mq</h1>
+  <div class="tools" id="tools"></div>
+  <span class="muted" id="updated"></span>
 </header>
 <main>
-  <section>
-    <h2>브로커 (Raft-lite)</h2>
-    <p class="hint">리더 = 컨트롤러. term 은 선거마다 오른다. "고립"을 누르면 그 브로커는 네트워크가 끊긴 것처럼 아무와도 이야기하지 못한다.
-      리더를 고립시키면 나머지 둘이 새 리더를 뽑고, 팔로워를 고립시키면 그 브로커 혼자 term 을 계속 올리다가 돌아와서 리더를 끌어내린다(PreVote 가 없어서).</p>
-    <div class="grid" id="brokers"></div>
+  <section class="card">
+    <svg id="flow" viewBox="0 0 1100 600" role="img" aria-label="생산자에서 소비자까지의 흐름과 컨트롤러"></svg>
+    <div class="legend">
+      <span><i style="border-color:var(--data)"></i>메시지 (굵기 = 초당 건수)</span>
+      <span><i style="border-color:var(--beat);border-top-style:dashed"></i>컨트롤러 박동 + 메타데이터 복제</span>
+      <span><i style="border-color:var(--route);border-top-style:dotted"></i>지도(메타데이터) 받기 = 라우팅</span>
+      <span><i style="border-color:var(--commit);border-top-style:dotted"></i>오프셋 커밋 → 그룹 코디네이터</span>
+      <span>사본 칸: <b>꽉 참</b> ISR · <b>점선</b> ISR 밖 · ★ 리더 · 칸 위 화살표 = 복제 (주황 뒤처짐 · 빨강 ISR 밖)</span>
+    </div>
   </section>
-  <div class="twocol">
+
+  <div class="two">
     <section>
-      <h2>파티션 (컨트롤러가 배정한 리더)</h2>
-      <p class="hint">2단계는 사본이 하나라 리더 브로커가 죽으면 그 파티션은 멈춘다. 3단계에서 사본이 넘겨받는다.</p>
-      <div class="grid" id="partitions"></div>
-      <h2 style="margin-top:18px">소비자 그룹 오프셋</h2>
-      <div class="card"><table>
-        <thead><tr><th>그룹</th><th>토픽-파티션</th><th>마지막 소비 오프셋</th><th>lag</th></tr></thead>
-        <tbody id="groups"></tbody>
-      </table></div>
+      <h2>이벤트</h2>
+      <div class="card"><table class="events"><tbody id="events"></tbody></table></div>
     </section>
     <section>
-      <h2>이벤트 (모든 브로커)</h2>
-      <div class="card"><table class="events">
-        <thead><tr><th>시각</th><th>브로커</th><th>term</th><th>무슨 일</th></tr></thead>
-        <tbody id="events"></tbody>
-      </table></div>
+      <details>
+        <summary>자세히: 파티션 · 소비자 그룹 숫자</summary>
+        <div class="card" style="margin-top:6px"><table>
+          <thead><tr><th>파티션</th><th>리더</th><th>ISR</th><th class="num">LEO</th><th class="num">HW</th></tr></thead>
+          <tbody id="ptable"></tbody></table></div>
+        <div class="card" style="margin-top:8px"><table>
+          <thead><tr><th>그룹</th><th>토픽</th><th class="num">lag 합</th><th>파티션별</th></tr></thead>
+          <tbody id="gtable"></tbody></table></div>
+      </details>
     </section>
   </div>
 </main>
 <script>
-const color = id => `var(--b${((id - 1) % 3) + 1})`;
+const C = id => `var(--b${((id - 1) % 3) + 1})`;
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
-const fmtBytes = b => b >= 1 << 20 ? (b / (1 << 20)).toFixed(1) + 'MB' : b >= 1024 ? (b / 1024).toFixed(0) + 'KB' : b + 'B';
-const time = ms => new Date(ms).toLocaleTimeString([], {hour12: false}) + '.' + String(ms % 1000).padStart(3, '0');
-const ROLE = {LEADER: '👑 리더 · 컨트롤러', CANDIDATE: '🗳 후보', FOLLOWER: '팔로워'};
+const time = ms => new Date(ms).toLocaleTimeString([], {hour12: false});
+const width = r => 1.2 + 2.4 * Math.log10(1 + r);
+// 다시 그려도 애니메이션이 끊기지 않게 시계 기준으로 위상을 맞춘다
+const anim = (r) => {
+  if (!r) return '';
+  const dur = Math.max(0.35, 2.4 - 0.75 * Math.log10(1 + r));
+  return `class="anim" style="animation-duration:${dur}s;animation-delay:-${(Date.now() / 1000) % dur}s"`;
+};
+const curve = (x1, y1, x2, y2) => { const dx = (x2 - x1) * 0.5; return `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`; };
 
-async function isolate(id, on) {
-  await fetch(`/admin/cluster/isolate?id=${id}&on=${on}`, {method: 'POST'}).catch(() => {});
-  refresh();
+async function act(action, id, value) {
+  await fetch(`/admin/cluster/${action}?id=${id}` + (value !== undefined ? `&value=${value}` : ''), {method: 'POST'}).catch(() => {});
+  setTimeout(refresh, 300);
+}
+
+function tools(nodes) {
+  document.getElementById('tools').innerHTML = nodes.map(n => {
+    const d = n.replicationDelayMs || 0, iso = n.reachable && n.raft.isolated;
+    return `<span class="tool"><span class="dot" style="background:${C(n.id)}"></span>broker-${n.id}
+      <button class="${iso ? 'on' : ''}" ${n.reachable ? '' : 'disabled'} onclick="act('isolate',${n.id},${!iso})" title="네트워크에서 떼어 낸다">고립</button>
+      <button class="${d ? 'on' : ''}" ${n.reachable ? '' : 'disabled'} onclick="act('slow',${n.id},${({0: 2000, 2000: 6000})[d] ?? 0})"
+        title="팔로워로서 가져가기 전에 쉰다: 끔 → 2초(ISR 안에서 뒤처짐) → 6초(ISR 에서 빠짐) → 끔">느린 복제${d ? ' ' + d / 1000 + '초' : ''}</button>
+      <button ${n.reachable ? '' : 'disabled'} onclick="act('crash',${n.id})" title="프로세스를 죽이고 15초 뒤 다시 띄운다">강제 종료</button></span>`;
+  }).join('');
+}
+
+function draw(s) {
+  const meta = s.metadata, nodes = s.nodes;
+  const up = nodes.filter(n => n.reachable);
+  const traffic = up.flatMap(n => (n.traffic || []).map(t => ({...t, broker: n.id})));
+  const reps = {};
+  up.forEach(n => (n.replicas || []).forEach(r => { (reps[`${r.topic}-${r.partition}`] ||= {})[n.id] = r; }));
+
+  // ---- 위: 컨트롤 플레인 (브로커 = Raft 구성원)
+  const BX = {}, BY = 70, BW = 180, BH = 78;
+  nodes.forEach((n, i) => { BX[n.id] = 550 + (i - (nodes.length - 1) / 2) * 240; });
+  let svg = '';
+  const ctrl = meta.controllerId;
+  nodes.forEach(n => {
+    if (n.id === ctrl || !n.reachable || !BX[ctrl]) return;
+    const x1 = BX[ctrl], x2 = BX[n.id];
+    svg += `<path d="M${x1},${BY - BH / 2} Q${(x1 + x2) / 2},${BY - BH / 2 - 34} ${x2},${BY - BH / 2}" fill="none" stroke="var(--beat)" stroke-width="2" stroke-dasharray="5 9" ${anim(4)}/>`;
+  });
+  if (BX[ctrl]) svg += `<text x="${BX[ctrl]}" y="${BY - BH / 2 - 22}" text-anchor="middle" font-size="11" fill="var(--muted)">박동 · 메타데이터 v${meta.version}</text>`;
+  nodes.forEach(n => {
+    const x = BX[n.id], info = meta.brokers[n.id] || {};
+    const r = n.reachable ? n.raft : null;
+    const leads = Object.values(meta.topics).filter(t => !t.name.startsWith('__')).flatMap(t => t.partitions.filter(p => p.leader === n.id)).length;
+    const flags = [];
+    if (!n.reachable) flags.push(['응답 없음', 'var(--bad)']);
+    else {
+      if (r.isolated) flags.push(['🔌 고립', 'var(--bad)']);
+      if (info.alive === false) flags.push(['죽음 표시', 'var(--bad)']);
+      if (n.replicationDelayMs) flags.push([`🐢 ${n.replicationDelayMs / 1000}초`, 'var(--warn)']);
+      if (r.acceptedVersion !== r.committedVersion) flags.push([`미커밋 v${r.acceptedVersion}`, 'var(--warn)']);
+    }
+    const role = !r ? '' : r.role === 'LEADER' ? '👑 컨트롤러' : r.role === 'CANDIDATE' ? '🗳 후보' : '';
+    svg += `<g opacity="${n.reachable && !r.isolated ? 1 : 0.45}">
+      <rect x="${x - BW / 2}" y="${BY - BH / 2}" width="${BW}" height="${BH}" rx="10" fill="var(--card)" stroke="${C(n.id)}" stroke-width="${n.id === ctrl ? 3 : 1.5}"/>
+      <text x="${x}" y="${BY - 14}" text-anchor="middle" font-weight="700">broker-${n.id} ${role}</text>
+      <text x="${x}" y="${BY + 4}" text-anchor="middle" font-size="12" fill="var(--muted)">${r ? `term ${r.term} · 리더 파티션 ${leads}개` : ''}</text>
+      <text x="${x}" y="${BY + 22}" text-anchor="middle" font-size="12" font-weight="600">${flags.map(([t, c]) => `<tspan fill="${c}">${esc(t)} </tspan>`).join('')}</text></g>`;
+  });
+
+  // ---- 아래: 데이터 플레인 (생산자 → 파티션 → 소비자)
+  const PX = 550, PW = 250, PH = 38, GAP = 8, TOP = 190;
+  const PY = {};
+  let y = TOP;
+  const topics = Object.values(meta.topics).filter(t => !t.name.startsWith('__')).sort((a, b) => a.name.localeCompare(b.name));
+  let parts = '';
+  topics.forEach(t => {
+    parts += `<text x="${PX - PW / 2}" y="${y + 4}" font-size="12" font-weight="700" fill="var(--muted)">${esc(t.name)} · 사본 ${t.replicationFactor} · 최소 ISR ${t.minInsyncReplicas}</text>`;
+    y += 14;
+    t.partitions.forEach(p => {
+      const key = `${t.name}-${p.partition}`, cy = y + PH / 2;
+      PY[key] = cy;
+      const lead = (reps[key] || {})[p.leader];
+      const off = p.leader < 0;
+      const chips = p.replicas.map((id, i) => {
+        const inIsr = p.isr.includes(id), cx = PX + 40 + i * 26;
+        const r = (reps[key] || {})[id];
+        const tip = `broker-${id}${id === p.leader ? ' (리더)' : ''}${inIsr ? ' · ISR' : ' · ISR 밖'}${r ? ' · LEO ' + r.logEndOffset : ''}`;
+        return `<g><title>${tip}</title><rect x="${cx}" y="${cy - 10}" width="20" height="20" rx="4" fill="${inIsr ? C(id) : 'none'}"
+          stroke="${C(id)}" stroke-width="2" stroke-dasharray="${inIsr ? '' : '3 2'}" opacity="${(meta.brokers[id] || {}).alive === false ? 0.3 : 1}"/>
+          <text x="${cx + 10}" y="${cy + 4}" text-anchor="middle" font-size="11" font-weight="700" fill="${inIsr ? '#fff' : C(id)}">${id === p.leader ? '★' : id}</text></g>`;
+      }).join('');
+      // 복제: 리더 칸 → 팔로워 칸 화살표. 최근에 가져갔고 따라잡았으면 흐르고, 뒤처지면 주황, ISR 밖이면 빨강
+      let repl = '';
+      const li = p.replicas.indexOf(p.leader);
+      if (lead && li >= 0) p.replicas.forEach((id, i) => {
+        if (id === p.leader) return;
+        const f = (lead.followers || {})[id];
+        const x1 = PX + 50 + li * 26, x2 = PX + 50 + i * 26, top = cy - 17;
+        const lag = f ? lead.logEndOffset - f.logEnd : null;
+        const fresh = f && f.lastFetchAgoMs < 1500;
+        const color = !p.isr.includes(id) ? 'var(--bad)' : (!fresh || lag > 20) ? 'var(--warn)' : C(id);
+        repl += `<path d="M${x1},${cy - 10} Q${(x1 + x2) / 2},${top - 4} ${x2},${cy - 10}" fill="none" stroke="${color}" stroke-width="1.6"
+          stroke-dasharray="3 3" ${fresh && lag <= 20 ? anim(30) : ''}><title>broker-${p.leader} → broker-${id} 복제: ${f ? `${lag}건 뒤처짐, ${(f.lastFetchAgoMs / 1000).toFixed(1)}초 전에 가져감` : '아직 안 옴'}</title></path>`;
+      });
+      const pending = lead ? lead.logEndOffset - lead.highWatermark : 0;
+      const sub = off ? '<tspan fill="var(--bad)">리더 없음</tspan>'
+        : lead ? `LEO ${lead.logEndOffset} · HW ${lead.highWatermark}${pending > 0 ? ` <tspan fill="var(--warn)">미복제 ${pending}</tspan>` : ''}` : '<tspan fill="var(--muted)">리더 응답 없음</tspan>';
+      parts += `<rect x="${PX - PW / 2}" y="${y}" width="${PW}" height="${PH}" rx="7" fill="var(--card)" stroke="${off ? 'var(--bad)' : 'var(--line)'}" stroke-width="${off ? 2 : 1}"/>
+        <rect x="${PX - PW / 2}" y="${y}" width="6" height="${PH}" rx="3" fill="${off ? 'var(--bad)' : C(p.leader)}"/>
+        <text x="${PX - PW / 2 + 14}" y="${cy - 3}" font-size="13" font-weight="700">${key}</text>
+        <text x="${PX - PW / 2 + 14}" y="${cy + 12}" font-size="10.5" fill="var(--muted)">${sub}</text>${chips}${repl}`;
+      y += PH + GAP;
+    });
+    y += 10;
+  });
+
+  // 생산자·소비자 노드: 보내는/가져가는 파티션들의 가운데 높이에 둔다
+  const live = traffic.filter(t => t.agoMs < 4000);
+  const clients = (kind) => {
+    const m = {};
+    live.filter(t => t.kind === kind && PY[`${t.topic}-${t.partition}`] !== undefined).forEach(t => {
+      const c = (m[t.client] ||= {name: t.client, edges: {}, rate: 0, detail: t.detail});
+      const k = `${t.topic}-${t.partition}`;
+      c.edges[k] = (c.edges[k] || 0) + t.rate; c.rate += t.rate;
+      if (t.detail) c.detail = t.detail;
+    });
+    const list = Object.values(m).map(c => ({...c, y: Object.keys(c.edges).reduce((a, k) => a + PY[k], 0) / Object.keys(c.edges).length}));
+    list.sort((a, b) => a.y - b.y);
+    for (let i = 1; i < list.length; i++) list[i].y = Math.max(list[i].y, list[i - 1].y + 70);
+    return list;
+  };
+  const producers = clients('produce'), consumers = clients('fetch');
+  const CX = {produce: 95, fetch: 1005}, NW = 170, NH = 50;
+
+  // 소비자 lag: 코디네이터가 가진 커밋 오프셋과 리더의 HW
+  const lagOf = {};
+  up.forEach(n => (n.offsets || []).forEach(o => {
+    const lead = (reps[`${o.topic}-${o.partition}`] || {})[(meta.topics[o.topic]?.partitions[o.partition] || {}).leader];
+    if (lead) lagOf['consumer-' + o.group] = (lagOf['consumer-' + o.group] || 0) + Math.max(0, lead.highWatermark - 1 - o.offset);
+  }));
+
+  let edges = '';
+  producers.forEach(c => Object.entries(c.edges).forEach(([k, r]) => {
+    edges += `<path d="${curve(CX.produce + NW / 2, c.y, PX - PW / 2, PY[k])}" fill="none" stroke="var(--data)" stroke-opacity="${r ? 0.8 : 0.25}" stroke-width="${width(r)}" stroke-dasharray="8 6" ${anim(r)}><title>${c.name} → ${k}: ${r}건/초</title></path>`;
+  }));
+  consumers.forEach(c => Object.entries(c.edges).forEach(([k, r]) => {
+    edges += `<path d="${curve(PX + PW / 2, PY[k], CX.fetch - NW / 2, c.y)}" fill="none" stroke="var(--data)" stroke-opacity="${r ? 0.8 : 0.25}" stroke-width="${width(r)}" stroke-dasharray="8 6" ${anim(r)}><title>${k} → ${c.name}: ${r}건/초</title></path>`;
+  }));
+  // 라우팅(지도 받기)과 오프셋 커밋: 클라이언트 ↔ 브로커
+  const pos = {};
+  producers.forEach(c => pos[c.name] = [CX.produce, c.y]);
+  consumers.forEach(c => pos[c.name] = [CX.fetch, c.y]);
+  traffic.filter(t => t.kind === 'metadata' && t.agoMs < 8000 && pos[t.client] && BX[t.broker]).forEach(t => {
+    const [x, cy] = pos[t.client];
+    edges += `<path d="M${x},${cy - NH / 2} Q${x},${BY} ${BX[t.broker] + (x < 550 ? -BW / 2 : BW / 2)},${BY + 10}" fill="none" stroke="var(--route)" stroke-width="2" stroke-dasharray="2 5" ${anim(8)}><title>${t.client} 가 broker-${t.broker} 에게 지도(${t.detail}) 받음 ${Math.round(t.agoMs / 1000)}초 전</title></path>`;
+  });
+  traffic.filter(t => t.kind === 'commit' && t.agoMs < 4000 && pos[t.client] && BX[t.broker]).forEach(t => {
+    const [x, cy] = pos[t.client];
+    edges += `<path d="M${x + 30},${cy - NH / 2} Q${x + 30},${BY + 40} ${BX[t.broker] + BW / 2},${BY + 20}" fill="none" stroke="var(--commit)" stroke-width="1.6" stroke-dasharray="2 5" ${anim(t.rate)}><title>${t.client} → broker-${t.broker}: 오프셋 커밋 (그룹 코디네이터)</title></path>`;
+  });
+
+  const clientNode = (c, x, kind) => {
+    const sub = kind === 'produce' ? `acks=${c.detail ?? '?'} · ${c.rate}/초` : `${c.rate}/초 · lag ${lagOf[c.name] ?? '?'}`;
+    return `<rect x="${x - NW / 2}" y="${c.y - NH / 2}" width="${NW}" height="${NH}" rx="10" fill="var(--card)" stroke="var(--data)" stroke-width="1.5"/>
+      <text x="${x}" y="${c.y - 4}" text-anchor="middle" font-weight="700" font-size="13">${esc(c.name)}</text>
+      <text x="${x}" y="${c.y + 14}" text-anchor="middle" font-size="11.5" fill="var(--muted)">${sub}</text>`;
+  };
+  const cl = producers.map(c => clientNode(c, CX.produce, 'produce')).join('') + consumers.map(c => clientNode(c, CX.fetch, 'fetch')).join('');
+  const heads = `<text x="${CX.produce}" y="${TOP - 18}" text-anchor="middle" font-size="12" fill="var(--muted)">생산자</text>
+    <text x="${PX}" y="${TOP - 18}" text-anchor="middle" font-size="12" fill="var(--muted)">파티션 (왼쪽 띠 = 리더 브로커)</text>
+    <text x="${CX.fetch}" y="${TOP - 18}" text-anchor="middle" font-size="12" fill="var(--muted)">소비자</text>`;
+  const fullH = Math.max(y + 10, 330, ...producers.map(c => c.y + NH), ...consumers.map(c => c.y + NH));
+  const el = document.getElementById('flow');
+  el.setAttribute('viewBox', `0 0 1100 ${fullH}`);
+  el.innerHTML = edges + svg + parts + cl + heads;
+}
+
+function tables(s) {
+  const meta = s.metadata, up = s.nodes.filter(n => n.reachable);
+  const reps = {};
+  up.forEach(n => (n.replicas || []).forEach(r => { (reps[`${r.topic}-${r.partition}`] ||= {})[n.id] = r; }));
+  const rows = [];
+  Object.values(meta.topics).sort((a, b) => a.name.localeCompare(b.name)).forEach(t => t.partitions.forEach(p => {
+    const l = (reps[`${t.name}-${p.partition}`] || {})[p.leader];
+    rows.push(`<tr><td>${esc(t.name)}-${p.partition}</td><td>${p.leader < 0 ? '<span class="bad">없음</span>' : 'broker-' + p.leader}</td>
+      <td>${p.isr.join(', ')}</td><td class="num">${l ? l.logEndOffset : '-'}</td><td class="num">${l ? l.highWatermark : '-'}</td></tr>`);
+  }));
+  document.getElementById('ptable').innerHTML = rows.join('');
+  const groups = {};
+  up.forEach(n => (n.offsets || []).forEach(o => {
+    const g = (groups[`${o.group}|${o.topic}`] ||= {group: o.group, topic: o.topic, parts: {}});
+    const l = (reps[`${o.topic}-${o.partition}`] || {})[(meta.topics[o.topic]?.partitions[o.partition] || {}).leader];
+    g.parts[o.partition] = l ? Math.max(0, l.highWatermark - 1 - o.offset) : null;
+  }));
+  document.getElementById('gtable').innerHTML = Object.values(groups).map(g => {
+    const e = Object.entries(g.parts).sort((a, b) => a[0] - b[0]);
+    return `<tr><td>${esc(g.group)}</td><td>${esc(g.topic)}</td><td class="num">${e.reduce((a, [, v]) => a + (v || 0), 0)}</td>
+      <td class="muted">${e.map(([p, v]) => `${p}:${v ?? '?'}`).join(' ')}</td></tr>`;
+  }).join('');
+  const events = up.flatMap(n => n.raft.events)
+    .sort((a, b) => b.at - a.at || (a.node === b.node ? b.seq - a.seq : a.node - b.node)).slice(0, 16);
+  document.getElementById('events').innerHTML = events.map(e =>
+    `<tr><td>${time(e.at)}</td><td><span class="dot" style="background:${C(e.node)}"></span> ${esc(e.text)}</td></tr>`).join('');
 }
 
 async function refresh() {
   let s;
-  try {
-    s = await (await fetch('/admin/cluster')).json();
-  } catch (e) {
-    document.getElementById('updated').textContent = '이 브로커에 연결할 수 없음 — 다른 포트(8081~8083)로 열어 보세요';
-    return;
-  }
-  const meta = s.metadata;
-  const nodes = s.nodes;
-  document.getElementById('summary').textContent =
-    `이 화면: broker-${s.servedBy} · 커밋된 메타데이터 v${meta.version} · 컨트롤러 ${meta.controllerId > 0 ? 'broker-' + meta.controllerId + ' (epoch ' + meta.controllerEpoch + ')' : '없음'}`;
-  document.getElementById('updated').textContent = '갱신 ' + new Date().toLocaleTimeString([], {hour12: false});
-
-  // 브로커 카드
-  document.getElementById('brokers').innerHTML = nodes.map(n => {
-    const info = meta.brokers[n.id] || {};
-    if (!n.reachable) {
-      return `<div class="card down"><h3><span><span class="lead" style="background:${color(n.id)}"></span>broker-${n.id}</span>
-        <span class="badge dead">응답 없음</span></h3><div class="nums">컨테이너가 꺼졌거나 이 화면의 브로커가 고립됨</div></div>`;
-    }
-    const r = n.raft;
-    const lagging = r.acceptedVersion !== r.committedVersion;
-    return `<div class="card ${r.isolated ? 'down' : ''}">
-      <h3><span><span class="lead" style="background:${color(n.id)}"></span>broker-${n.id}</span>
-          <span class="badge ${r.role}">${ROLE[r.role]}</span></h3>
-      <div class="kv">
-        <span>term</span><span>${r.term}</span>
-        <span>투표</span><span>${r.votedFor ? 'broker-' + r.votedFor : '—'}</span>
-        <span>따르는 리더</span><span>${r.leaderId ? 'broker-' + r.leaderId : '—'}</span>
-        <span>메타데이터</span><span>커밋 v${r.committedVersion}${lagging ? ` · <b class="CANDIDATE">받기만 한 v${r.acceptedVersion}</b>` : ''}</span>
-        <span>컨트롤러가 보기에</span><span>${info.alive === false ? '<b class="dead">죽음</b>' : '살아 있음'}</span>
-      </div>
-      ${r.isolated
-        ? `<span class="badge dead">🔌 고립 중</span> <button onclick="isolate(${n.id}, false)">다시 연결</button>`
-        : `<button onclick="isolate(${n.id}, true)">🔌 고립</button>`}
-    </div>`;
-  }).join('');
-
-  // 파티션: 리더 브로커의 로컬 상태에서 세그먼트를 찾는다
-  const local = {};
-  const groups = [];
-  nodes.filter(n => n.reachable).forEach(n => {
-    (n.partitions || []).forEach(p => { local[`${p.topic}-${p.partition}`] = {...p, holder: n.id}; });
-    (n.groups || []).forEach(g => groups.push(g));
-  });
-  const parts = [];
-  Object.values(meta.topics).forEach(t => t.partitions.forEach(p => parts.push({topic: t.name, ...p})));
-  document.getElementById('partitions').innerHTML = parts.length ? parts.map(p => {
-    const st = local[`${p.topic}-${p.partition}`];
-    const leaderAlive = (meta.brokers[p.leader] || {}).alive !== false;
-    const total = st ? st.segments.reduce((a, x) => a + x.bytes, 0) || 1 : 1;
-    const bars = st ? st.segments.map(x => `<div class="seg ${x.active ? 'active' : ''}" style="flex:${Math.max(x.bytes, total * 0.03)}"
-        title="${esc(x.file)}&#10;offset ${x.baseOffset}~${x.baseOffset + x.count - 1} (${x.count}건, ${fmtBytes(x.bytes)})"></div>`).join('') : '';
-    return `<div class="card ${leaderAlive ? '' : 'down'}">
-      <h3><span>${esc(p.topic)}-${p.partition}</span>
-          <span class="nums"><span class="lead" style="background:${color(p.leader)}"></span>리더 broker-${p.leader}</span></h3>
-      ${st ? `<div class="bar">${bars}</div><div class="nums">LEO ${st.logEndOffset} · 세그먼트 ${st.segments.length}개 · logStart ${st.logStartOffset}</div>`
-           : `<div class="nums ${leaderAlive ? '' : 'dead'}">${leaderAlive ? '상태를 못 가져옴' : '리더 브로커 다운 — 사본이 없어 멈춤'}</div>`}
-    </div>`;
-  }).join('') : '<div class="empty">아직 토픽이 없습니다.</div>';
-
-  groups.sort((a, b) => a.group.localeCompare(b.group) || a.partition - b.partition);
-  document.getElementById('groups').innerHTML = groups.length ? groups.map(g =>
-    `<tr><td>${esc(g.group)}</td><td>${esc(g.topic)}-${g.partition}</td><td>${g.committed}</td>
-         <td class="${g.lag === 0 ? 'lag0' : g.lag > 1000 ? 'lagHi' : ''}">${g.lag}</td></tr>`).join('')
-    : '<tr><td colspan="4" class="empty">아직 커밋한 그룹이 없습니다.</td></tr>';
-
-  // 이벤트 타임라인
-  const events = nodes.filter(n => n.reachable).flatMap(n => n.raft.events).sort((a, b) => b.at - a.at || (a.node === b.node ? b.seq - a.seq : a.node - b.node)).slice(0, 40);
-  document.getElementById('events').innerHTML = events.map(e =>
-    `<tr><td>${time(e.at)}</td><td><span class="lead" style="background:${color(e.node)}"></span>${e.node}</td><td>${e.term}</td><td>${esc(e.text)}</td></tr>`).join('');
+  try { s = await (await fetch('/admin/cluster')).json(); }
+  catch (e) { document.getElementById('updated').textContent = '연결 안 됨 — 8081~8083 중 다른 포트로'; return; }
+  tools(s.nodes);
+  draw(s);
+  tables(s);
+  document.getElementById('updated').textContent = time(Date.now());
 }
 refresh();
 setInterval(refresh, 1000);

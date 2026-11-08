@@ -1,5 +1,7 @@
 server:
   port: 8080
+  error:
+    include-message: always   # NOT_ENOUGH_REPLICAS 같은 거절 이유를 클라이언트가 볼 수 있게
 spring:
   application:
     name: mini-mq-broker

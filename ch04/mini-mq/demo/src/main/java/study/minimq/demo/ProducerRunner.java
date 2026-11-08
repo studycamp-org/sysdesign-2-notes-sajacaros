@@ -11,7 +11,9 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
+import study.minimq.client.MiniMqHttp;
 import study.minimq.client.Producer;
+import study.minimq.common.TopicInfo;
 
 /**
  * S1 로그창고 흉내: 서버 N대가 로그 한 줄씩 보낸다. 키 = 서버 ID.
@@ -32,14 +34,18 @@ class ProducerRunner implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) throws Exception {
-        Startup.createTopic(props.bootstrap(), props.topic(), props.topicPartitions());
+        MiniMqHttp.setClientId("producer-" + props.topic());
+        Startup.createTopic(props.bootstrap(), new TopicInfo(props.topic(), props.topicPartitions(),
+                props.replicationFactor(), props.minInsyncReplicas()));
 
-        Producer.Config cfg = new Producer.Config(props.bootstrap(), props.batchSize(), props.lingerMs(), props.acks(), 5);
+        // 재시도를 끝없이 한다: 생산자가 "실패"로 포기하는 메시지가 없으므로, 소비자가 보는 gap 은
+        // 전부 "응답(ACK)까지 받았는데 사라진" 메시지다
+        Producer.Config cfg = new Producer.Config(props.bootstrap(), props.batchSize(), props.lingerMs(), props.acksValue(), Integer.MAX_VALUE);
         long[] seq = new long[props.servers()];
         String run = Long.toHexString(System.nanoTime() & 0xffffff); // 생산자가 재시작하면 seq 가 1부터 다시 시작하므로 구분용
         long intervalNanos = 1_000_000_000L / Math.max(1, props.ratePerSec());
-        log.info("producer 시작 topic={} servers={} rate={}/s batch={} linger={}ms acks={}",
-                props.topic(), props.servers(), props.ratePerSec(), props.batchSize(), props.lingerMs(), props.acks());
+        log.info("producer 시작 topic={} servers={} rate={}/s batch={} linger={}ms acks={} 최소ISR={}",
+                props.topic(), props.servers(), props.ratePerSec(), props.batchSize(), props.lingerMs(), props.acks(), props.minInsyncReplicas());
 
         try (Producer producer = new Producer(cfg)) {
             long next = System.nanoTime();
@@ -63,7 +69,7 @@ class ProducerRunner implements ApplicationRunner {
 
                 if (System.currentTimeMillis() - lastReport >= 5_000) {
                     lastReport = System.currentTimeMillis();
-                    log.info("[producer] {}", producer.stats());
+                    log.info("[producer {} acks={}] {}", props.topic(), props.acks(), producer.stats());
                 }
             }
         }

@@ -9,8 +9,8 @@
 |---|---|---|---|
 | 1 | 세그먼트 로그 저장소, 생산자 버퍼·일괄 전송, 풀 + 롱 폴링 소비자, 오프셋 커밋 | 그림 4.9~4.14, 4.21, 4.32~4.33 | ✅ |
 | 2 | 컨트롤러 선출 (Raft-lite: term·과반 투표·메타데이터 스냅샷 복제·epoch 펜싱), 파티션 배정, 클라이언트 라우팅 | 그림 4.8, 4.11~4.12, 4.22 자리 | ✅ |
-| 3 | 복제: 리더/팔로워, ISR, 합의 오프셋, ACK=0/1/all, 최소 ISR, 브로커 장애 복구 | 그림 4.23~4.28 | ⏳ |
-| 4 | 소비자 그룹 코디네이터, 재조정, `__consumer_offsets` 내부 토픽 | 그림 4.15~4.20 | ⏳ |
+| 3 | 복제: 리더/팔로워, ISR, 합의 오프셋(HW), ACK=1/all, 최소 ISR, 장애 복구, 꼬리 잘라내기, 오프셋도 복제(`__consumer_offsets`) | 그림 4.23~4.28 | ✅ |
+| 4 | 소비자 그룹 코디네이터, 재조정 (한 그룹에 소비자 여럿) | 그림 4.15~4.20 | ⏳ |
 
 ## 실행
 
@@ -19,9 +19,58 @@
 ```bash
 ./run.sh                      # jar 빌드 + docker compose up -d
 open http://localhost:8081    # 대시보드 (8082, 8083 도 같은 화면)
-docker compose logs -f producer consumer-search consumer-anomaly
+docker compose logs -f producer-logs producer-orders consumer-logs consumer-orders
 docker compose down -v        # 끝. -v 는 브로커 데이터까지 지운다
 ```
+
+## 대시보드
+
+http://localhost:8081 (8082, 8083 도 같은 화면). 위에서 아래로:
+
+- **컨트롤 플레인**: 브로커 3대. 👑 = 컨트롤러(Raft 리더), 금색 점선 = 박동 + 메타데이터 복제
+- **데이터 플레인**: 생산자 → 파티션 → 소비자. 선 굵기 = 초당 건수
+  - 파티션 왼쪽 띠 색 = 리더 브로커, 사본 칸 = ★ 리더 / 꽉 참 ISR / 점선 ISR 밖, 칸 위 화살표 = 복제(주황 뒤처짐, 빨강 ISR 밖)
+- **보라 점선** = 클라이언트가 지도(메타데이터)를 받아 감 = 라우팅. 평소엔 없고 장애 직후에 나타난다
+- **초록 점선** = 오프셋 커밋 → 그룹 코디네이터 브로커
+- 맨 위 버튼: **고립** / **느린 복제**(끔 → 2초 → 6초) / **강제 종료**(15초 뒤 다시 뜸)
+
+## 3단계: 복제 (그림 4.23~4.28)
+
+```
+producer-logs   (ACK=1)   ─▶  logs   6 파티션 × 사본 3, 최소 ISR 1  ─▶ consumer-search
+producer-orders (ACK=all) ─▶  orders 3 파티션 × 사본 3, 최소 ISR 2  ─▶ consumer-payment
+```
+
+| 개념 | 여기서 | 코드 |
+|---|---|---|
+| 리더 사본 / 단순 사본 | 생산자는 리더에만 쓰고, 팔로워가 리더에서 가져간다(pull) | `ReplicaManager.followLoop` |
+| ISR | 리더가 0.5초마다 판단: 4초 동안 안 왔거나 1000건 넘게 뒤처지면 빼 달라고, 따라잡으면 넣어 달라고 컨트롤러에 요청 | `evaluateIsr`, `Controller.alterIsr` |
+| 합의 오프셋 (HW) | ISR 전원의 LEO 최솟값. **소비자는 HW 앞까지만** 읽는다 | `maybeAdvanceHighWatermark` |
+| ACK=1 / all | 1 = 리더 저장 후 응답, all = HW 가 넘어가면 응답 | `ReplicaManager.produce` |
+| 최소 ISR | ACK=all 인데 ISR 이 이보다 적으면 **저장하지 않고 503** | 〃 |
+| 브로커 장애 복구 | 컨트롤러가 죽은 브로커를 ISR 에서 빼고, 리더였으면 ISR 에서 새 리더 + leader epoch +1. ISR 이 다 죽으면 리더 없음 | `Controller.onBrokerDead` |
+| 꼬리 잘라내기 (교재 밖, KIP-101) | 돌아온 옛 리더는 "내 마지막 epoch 가 새 리더 로그에서 어디까지?"를 묻고 그 뒤를 자른다 | `truncateToLeader`, `PartitionLog.endOffsetForEpoch` |
+| 상태 저장소 | 오프셋도 내부 토픽 `__consumer_offsets`(사본 3, ACK=all)에. 그룹 이름 해시 → 파티션 → 그 리더가 코디네이터 | `OffsetStore` |
+
+생산자는 재시도를 끝없이 한다. 그래서 소비자의 `gap` 은 전부 **ACK 를 받았는데 사라진** 메시지다.
+
+### 실제로 본 것
+
+| 실험 | 결과 |
+|---|---|
+| 평소 | ACK=1 과 ACK=all 의 응답 지연이 비슷하다 (둘 다 약 30ms, 대부분 linger 20ms). 팔로워가 롱 폴링으로 바로 가져가기 때문 |
+| 팔로워 둘을 **느린 복제 2초** | ACK=all 응답 지연 26ms → **평균 3초, 최대 4.5초**. ACK=1 은 그대로. "가장 느린 ISR 을 기다린다" |
+| 그 상태에서 리더 **강제 종료** | 컨트롤러가 3초 뒤 죽음 표시 → 리더 이동(epoch 0→1), ISR [2,3]. 생산자가 지도를 다시 받음(보라 점선) |
+| 옛 리더가 돌아옴 | `✂ logs-0 꼬리 4건, logs-3 꼬리 3건 잘라냄` → **consumer-search gap=7** (ACK=1 이 응답하고 잃은 것). **consumer-payment gap=0** (ACK=all) |
+| 팔로워 둘을 **느린 복제 6초** | 4초 기준을 넘어 ISR=[리더] 로 줄어듦. 그 파티션에 ACK=all → **503 NOT_ENOUGH_REPLICAS**, ACK=1 → 200. orders 생산자는 재시도하며 기다림(유실 0) |
+| 복구 | 지연을 풀면 따라잡은 사본이 ISR 로 복귀, ACK=all 지연 30ms 대로 |
+
+### 3단계의 한계
+
+- **선호 리더 복귀 없음**: 죽었다 돌아온 브로커는 팔로워로만 남는다. 리더가 한 브로커에 몰린다(실험 뒤 broker-2 가 리더 6개, broker-1 이 0개)
+- 소비자는 커밋된 오프셋을 받아야 시작한다. 그룹 코디네이터 브로커가 죽으면 `__consumer_offsets` 리더가 옮겨질 때까지(몇 초) 소비가 멈춘다
+- HW 를 디스크에 남기지 않는다. 재시작한 리더는 팔로워가 한 번씩 올 때까지 HW 를 올리지 않는다
+- ISR 이 모두 죽으면 깨끗한 리더 선출만 한다(ISR 밖 사본을 리더로 올리는 unclean 선출 없음 = 가용성보다 영속성)
 
 ## 2단계: 주키퍼 없이 컨트롤러 뽑기 (Raft-lite)
 
@@ -51,7 +100,7 @@ Raft-lite 가 Raft 에서 가져온 것: term, 무작위 선거 타임아웃, �
 
 ### 대시보드에서 해 볼 실험
 
-브로커 카드의 **🔌 고립** 버튼은 그 브로커를 네트워크에서 떼어 낸 것처럼 만든다 (Raft·생산·소비 요청을 503 으로 막고, 밖으로도 못 보냄).
+맨 위 **고립** 버튼은 그 브로커를 네트워크에서 떼어 낸 것처럼 만든다 (Raft·생산·소비 요청을 503 으로 막고, 밖으로도 못 보냄).
 진짜로 죽이려면 `docker compose stop broker-2` / `start broker-2`.
 
 | 실험 | 실제로 본 것 |
@@ -63,15 +112,15 @@ Raft-lite 가 Raft 에서 가져온 것: term, 무작위 선거 타임아웃, �
 | **팔로워 고립 10초** | 혼자 선거를 반복해 term 6 까지 올림 → 돌아오자 멀쩡한 리더가 그 term 을 보고 **내려옴**. 그러나 broker-1 은 메타데이터가 뒤처져(v5 < v6) 표를 못 받고, term 7 에 broker-2 가 당선. 쓸데없는 리더 교체 = PreVote 가 막는 문제 |
 | 리더 컨테이너 정지 | 남은 둘 중 하나가 term 10 으로 당선, 3초 뒤 죽은 브로커 표시. 다시 켜면 팔로워로 합류. 재배포해도 term 이 이어진다(`raft.json`) |
 
-### 2단계의 한계 (= 3단계에서 풀 것)
+### 2단계의 한계
 
-- **사본이 하나뿐**이다. 리더 브로커가 죽으면 그 파티션은 살아날 때까지 멈추고, 그동안 생산자 재시도가 바닥나면 유실된다.
-  컨트롤러는 브로커가 죽은 걸 알지만 넘겨줄 사본이 없다.
-- 소비자 오프셋은 그 파티션의 리더 브로커 로컬 파일에 있다.
+- (3단계에서 풂) 사본이 하나뿐이라 리더 브로커가 죽으면 그 파티션이 멈췄다. 오프셋도 리더 로컬 파일이었다.
 - PreVote 가 없어 고립됐다 돌아온 노드가 리더를 끌어내린다. 일부러 남겨 뒀다(눈에 보이게). 넣는다면: 출마 전에 "지금 리더 박동이 끊겼는지"를 과반에게 먼저 물어본다.
 - 커밋 전에 리더 자리를 잃으면 요청한 쪽은 실패를 받지만, 실제로는 나중에 커밋될 수도 있다(결과 미상). Raft 의 원래 성질이다.
 
 ## 1단계: 로그 저장소와 전달 보장
+
+> 지금 `docker-compose.yml` 은 3단계 구성이다. 아래의 anomaly 소비자·크래시 실험을 다시 보려면 compose 끝 주석대로 소비자에 `DEMO_CRASH_EVERY_SEC`·`DEMO_COMMIT_MODE: before`·`DEMO_PROCESS_MS` 를 넣는다.
 
 ```
 producer ──(서버 ID 키, 버퍼에 모아 일괄 전송)──▶ 파티션 리더 ◀──(풀 + 롱 폴링)── consumer-search  (처리 후 커밋)
@@ -120,6 +169,9 @@ producer ──(서버 ID 키, 버퍼에 모아 일괄 전송)──▶ 파티�
 | `MINIMQ_ELECTION_MIN_MS` / `MAX_MS` | 1500 / 3000 | 선거 타임아웃 범위. 노드마다 무작위 |
 | `MINIMQ_HEARTBEAT_MS` | 500 | 컨트롤러 박동 주기 |
 | `MINIMQ_BROKER_DEAD_MS` | 3000 | 이 시간 응답이 없으면 컨트롤러가 죽음으로 표시 |
+| `MINIMQ_REPLICA_LAG_TIME_MS` / `LAG_MAX_MESSAGES` | 4000 / 1000 | 이 시간 안 오거나 이만큼 뒤처지면 ISR 에서 뺀다 |
+| `MINIMQ_ACK_TIMEOUT_MS` | 5000 | ACK=all 이 ISR 전원을 기다리는 최대 시간 |
+| `DEMO_ACKS` / `DEMO_MIN_INSYNC_REPLICAS` | 1 / 1 | 생산자 acks(0, 1, all) / 토픽을 만들 때 최소 ISR |
 | `DEMO_RATE_PER_SEC` / `DEMO_SERVERS` | 200 / 20 | 생산 속도 / 키 개수 |
 | `DEMO_BATCH_SIZE` / `DEMO_LINGER_MS` | 50 / 20 | 생산자 묶음 크기 / 최대 대기 시간 |
 | `DEMO_COMMIT_MODE` | after | before = 최대 한 번, after = 최소 한 번 |
@@ -132,16 +184,14 @@ producer ──(서버 ID 키, 버퍼에 모아 일괄 전송)──▶ 파티�
 |---|---|
 | `common` | 메시지 자료 구조(표 4.1), 요청·응답, CRC, 파티셔너 |
 | `client` | 생산자·소비자 라이브러리 + `ClusterView`(지도). 스프링 없이 `java.net.http` 만 쓴다 |
-| `broker` | Spring Boot. `LogSegment`(WAL 파일 하나) → `PartitionLog`(세그먼트 나열) → `LogManager`(맡은 파티션) + `OffsetStore` + `raft/`(선출·메타데이터 복제) + `Controller` + 대시보드 |
+| `broker` | Spring Boot. `LogSegment`(WAL 파일 하나) → `PartitionLog`(세그먼트 나열, HW, epoch 캐시) → `ReplicaManager`(리더·팔로워, ISR) + `OffsetStore` + `raft/`(선출·메타데이터 복제) + `Controller` + `Traffic`·대시보드 |
 | `demo` | 생산자·소비자 데모 앱 (`DEMO_ROLE` 로 고른다) |
 
 ## 일부러 단순하게 한 것
 
 - **HTTP/JSON** 으로 주고받는다. 교재의 "메시지를 변형 없이 전달해 복사 최소화" 이점은 재현하지 않는다
 - 오프셋 → 파일 위치 색인을 메모리에 다 들고 있고, 재시작 때 파일을 처음부터 훑는다 (카프카는 희소 색인 파일)
-- 사본이 아직 하나라 ACK 설정이 의미가 없다 (사실상 ACK=1). 3단계에서 다룬다
 - 소비자는 그룹 안 소비자가 1명이라고 가정하고 모든 파티션을 맡는다. 4단계에서 코디네이터가 나눠 준다
-- 오프셋은 파티션 리더 브로커의 로컬 JSON 파일에 둔다. 4단계에서 옮긴다
 - 파티션별 전송 스레드는 하나뿐이다 (카프카 `max.in.flight=1` 과 같음). 그래서 재시도해도 파티션 안 순서가 뒤집히지 않는다
 
 ## 알려진 이슈

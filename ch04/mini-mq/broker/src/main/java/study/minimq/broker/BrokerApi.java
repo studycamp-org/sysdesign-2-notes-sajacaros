@@ -1,12 +1,14 @@
 package study.minimq.broker;
 
 import java.util.Collection;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -20,17 +22,22 @@ import study.minimq.common.TopicInfo;
 
 @RestController
 public class BrokerApi {
-    private final LogManager logs;
+    private final ReplicaManager replicas;
     private final OffsetStore offsets;
     private final Controller controller;
     private final RaftNode raft;
+    private final Traffic traffic;
+    private static final String CLIENT = "X-MiniMq-Client";
 
-    public BrokerApi(LogManager logs, OffsetStore offsets, Controller controller, RaftNode raft) {
-        this.logs = logs;
+    public BrokerApi(ReplicaManager replicas, OffsetStore offsets, Controller controller, RaftNode raft, Traffic traffic) {
+        this.traffic = traffic;
+        this.replicas = replicas;
         this.offsets = offsets;
         this.controller = controller;
         this.raft = raft;
     }
+
+    // ---------------------------------------------------------------- 메타데이터
 
     /** 어느 브로커에 보내도 된다. 컨트롤러가 아니면 컨트롤러에게 넘긴다. */
     @PostMapping("/topics")
@@ -40,50 +47,79 @@ public class BrokerApi {
 
     @GetMapping("/topics")
     public Collection<TopicInfo> topics() {
-        return logs.topics();
+        return replicas.topics();
     }
 
     /** 생산자·소비자가 보는 "지도". 어느 브로커에 물어봐도 커밋된 메타데이터를 준다. */
     @GetMapping("/metadata")
-    public ClusterMetadata metadata() {
-        return raft.committed();
+    public ClusterMetadata metadata(@RequestHeader(value = CLIENT, required = false) String client) {
+        ClusterMetadata m = raft.committed();
+        traffic.record(client, "metadata", "", -1, 1, "v" + m.version());
+        return m;
     }
 
-    /** 생산자가 묶음을 보낸다. 이 브로커가 그 파티션의 리더가 아니면 409. */
+    // ---------------------------------------------------------------- 생산자·소비자
+
+    /** acks: 0, 1, -1(=all). 이 브로커가 그 파티션의 리더가 아니면 409. */
     @PostMapping("/produce")
-    public ProduceResponse produce(@RequestBody ProduceRequest req) {
-        long[] range = logs.log(req.topic(), req.partition()).append(req.records());
-        return new ProduceResponse(req.topic(), req.partition(), range[0], range[1]);
+    public CompletableFuture<ProduceResponse> produce(@RequestBody ProduceRequest req,
+                                                      @RequestHeader(value = CLIENT, required = false) String client) {
+        traffic.record(client, "produce", req.topic(), req.partition(), req.records().size(),
+                req.acks() < 0 ? "all" : Integer.toString(req.acks()));
+        return replicas.produce(req.topic(), req.partition(), req.acks(), req.records())
+                .thenApply(r -> new ProduceResponse(req.topic(), req.partition(), r[0], r[1]));
     }
 
-    /**
-     * 풀 모델 + 롱 폴링 (그림 4.14). offset 부터 최대 max 건을 묶어 준다.
-     * 줄 게 없으면 waitMs 동안 기다렸다가, 그 사이 메시지가 들어오면 바로 응답한다.
-     */
+    /** 풀 + 롱 폴링 (그림 4.14). HW(합의 오프셋) 앞까지만 준다. */
     @GetMapping("/fetch")
     public CompletableFuture<FetchResponse> fetch(@RequestParam String topic,
                                                  @RequestParam int partition,
                                                  @RequestParam long offset,
                                                  @RequestParam(defaultValue = "500") int max,
-                                                 @RequestParam(defaultValue = "0") long waitMs) {
-        PartitionLog log = logs.log(topic, partition);
-        CompletableFuture<Void> ready = waitMs <= 0
-                ? CompletableFuture.completedFuture(null)
-                : log.awaitData(offset).completeOnTimeout(null, waitMs, TimeUnit.MILLISECONDS);
-        return ready.thenApply(x -> new FetchResponse(topic, partition, log.read(offset, max),
-                log.logStartOffset(), log.logEndOffset()));
+                                                 @RequestParam(defaultValue = "0") long waitMs,
+                                                 @RequestHeader(value = CLIENT, required = false) String client) {
+        return replicas.consumerFetch(topic, partition, offset, max, waitMs).thenApply(r -> {
+            traffic.record(client, "fetch", topic, partition, r.messages().size(), null);
+            return r;
+        });
     }
 
-    /** 오프셋은 그 파티션의 리더 브로커에 저장한다 (2단계 임시. 4단계에서 __consumer_offsets 로). */
+    /** 오프셋 커밋. 그룹 코디네이터(= __consumer_offsets 의 해당 파티션 리더)에게 보낸다. */
     @PostMapping("/offsets")
-    public void commit(@RequestBody OffsetCommit c) {
-        logs.log(c.topic(), c.partition());
-        offsets.commit(c);
+    public CompletableFuture<Void> commit(@RequestBody List<OffsetCommit> commits,
+                                          @RequestHeader(value = CLIENT, required = false) String client) {
+        traffic.record(client, "commit", "", -1, 1, commits.isEmpty() ? null : commits.get(0).group());
+        return offsets.commit(commits);
     }
 
     @GetMapping("/offsets")
-    public long committed(@RequestParam String group, @RequestParam String topic, @RequestParam int partition) {
-        logs.log(topic, partition);
-        return offsets.committed(group, topic, partition);
+    public Map<Integer, Long> committed(@RequestParam String group, @RequestParam String topic) {
+        return offsets.committed(group, topic);
+    }
+
+    // ---------------------------------------------------------------- 브로커끼리
+
+    /** 팔로워가 리더에게서 가져간다. offset = 팔로워의 LEO. */
+    @GetMapping("/replica/fetch")
+    public CompletableFuture<FetchResponse> replicaFetch(@RequestParam String topic,
+                                                        @RequestParam int partition,
+                                                        @RequestParam long offset,
+                                                        @RequestParam int replicaId,
+                                                        @RequestParam int leaderEpoch,
+                                                        @RequestParam(defaultValue = "2000") int max,
+                                                        @RequestParam(defaultValue = "500") long waitMs) {
+        return replicas.replicaFetch(topic, partition, offset, replicaId, leaderEpoch, max, waitMs);
+    }
+
+    /** 팔로워가 잘라낼 위치를 묻는다: 그 epoch 는 리더 로그에서 어디까지인가. */
+    @GetMapping("/replica/epoch-end")
+    public long epochEnd(@RequestParam String topic, @RequestParam int partition, @RequestParam int epoch) {
+        return replicas.epochEnd(topic, partition, epoch);
+    }
+
+    /** 파티션 리더가 컨트롤러에게 ISR 을 바꿔 달라고 한다. */
+    @PostMapping("/controller/alter-isr")
+    public void alterIsr(@RequestBody ReplicaManager.AlterIsr req) {
+        controller.alterIsr(req);
     }
 }

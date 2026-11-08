@@ -1,4 +1,6 @@
-# 2단계: 브로커 3대가 Raft-lite 로 컨트롤러를 뽑는다 (주키퍼 없음) + 생산자 1 + 소비자 그룹 2
+# 3단계: 브로커 3대 (Raft-lite 컨트롤러 + 파티션마다 사본 3개)
+#   logs   토픽: ACK=1,   최소 ISR 1  ← S1 로그창고처럼 처리량 우선
+#   orders 토픽: ACK=all, 최소 ISR 2  ← 유실 0 이 목표
 #   대시보드  http://localhost:8081  (8082, 8083 도 같은 화면)
 name: mini-mq
 
@@ -16,6 +18,8 @@ x-broker-env: &broker-env
   MINIMQ_ELECTION_MAX_MS: "3000"
   MINIMQ_HEARTBEAT_MS: "500"
   MINIMQ_BROKER_DEAD_MS: "3000"
+  MINIMQ_REPLICA_LAG_TIME_MS: "4000"        # 4초 동안 안 가져가면 ISR 에서 뺀다
+  MINIMQ_REPLICA_LAG_MAX_MESSAGES: "1000"   # 1000건 넘게 뒤처져도 뺀다
 
 x-demo: &demo
   build: { context: ., dockerfile: docker/Dockerfile, args: { MODULE: demo } }
@@ -42,37 +46,49 @@ services:
     ports: ["8083:8080"]
     volumes: [broker-3:/data]
 
-  producer:
+  producer-logs:
     <<: *demo
     environment:
       DEMO_ROLE: producer
       DEMO_BOOTSTRAP: *bootstrap
+      DEMO_TOPIC: logs
       DEMO_TOPIC_PARTITIONS: "6"
-      DEMO_SERVERS: "20"
+      DEMO_ACKS: "1"
+      DEMO_MIN_INSYNC_REPLICAS: "1"
       DEMO_RATE_PER_SEC: "200"
-      DEMO_BATCH_SIZE: "50"
-      DEMO_LINGER_MS: "20"
 
-  # 검색 색인 그룹: 처리 후 커밋(최소 한 번), 충분히 빠르다
-  consumer-search:
+  producer-orders:
+    <<: *demo
+    environment:
+      DEMO_ROLE: producer
+      DEMO_BOOTSTRAP: *bootstrap
+      DEMO_TOPIC: orders
+      DEMO_TOPIC_PARTITIONS: "3"
+      DEMO_ACKS: all
+      DEMO_MIN_INSYNC_REPLICAS: "2"
+      DEMO_RATE_PER_SEC: "100"
+
+  # 처리 후 커밋(최소 한 번). gap 이 생기면 = ACK 를 받았는데 사라진 메시지
+  consumer-logs:
     <<: *demo
     environment:
       DEMO_ROLE: consumer
       DEMO_BOOTSTRAP: *bootstrap
+      DEMO_TOPIC: logs
       DEMO_GROUP: search
       DEMO_COMMIT_MODE: after
-      DEMO_CRASH_EVERY_SEC: "20"       # 20초마다 처리 도중 죽음 → dup 이 늘어난다
 
-  # 이상 탐지 그룹: 처리 전 커밋(최대 한 번), 일부러 느리게 → lag 가 쌓인다 (S1 돌발 상황)
-  consumer-anomaly:
+  consumer-orders:
     <<: *demo
     environment:
       DEMO_ROLE: consumer
       DEMO_BOOTSTRAP: *bootstrap
-      DEMO_GROUP: anomaly
-      DEMO_COMMIT_MODE: before
-      DEMO_PROCESS_MS: "8"
-      DEMO_CRASH_EVERY_SEC: "20"       # 20초마다 처리 도중 죽음 → gap 이 늘어난다
+      DEMO_TOPIC: orders
+      DEMO_GROUP: payment
+      DEMO_COMMIT_MODE: after
+
+  # 1단계 실험(처리 도중 죽음 → 최대 한 번이면 gap, 최소 한 번이면 dup)을 다시 보려면
+  # 소비자에 DEMO_CRASH_EVERY_SEC: "20" 을, 최대 한 번은 DEMO_COMMIT_MODE: before 를 넣는다
 
 volumes:
   broker-1:

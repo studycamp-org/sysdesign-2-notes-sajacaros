@@ -18,7 +18,7 @@ final class Startup {
     }
 
     /** 컨트롤러가 뽑히고 토픽이 만들어질 때까지 (아무 브로커에나 요청해도 컨트롤러에게 전달된다). */
-    static void createTopic(String bootstrap, String topic, int partitions) throws InterruptedException {
+    static void createTopic(String bootstrap, TopicInfo topic) throws InterruptedException {
         ClusterView view = new ClusterView(bootstrap);
         while (true) {
             try {
@@ -26,8 +26,9 @@ final class Startup {
                 if (m.controllerId() < 0) {
                     log.info("컨트롤러 선출을 기다리는 중...");
                 } else {
-                    view.any().post("/topics", new TopicInfo(topic, partitions), TopicInfo.class, Duration.ofSeconds(5));
-                    log.info("토픽 {} 준비됨 (컨트롤러 broker-{})", topic, m.controllerId());
+                    TopicInfo t = view.any().post("/topics", topic, TopicInfo.class, Duration.ofSeconds(5));
+                    log.info("토픽 {} 준비됨: 파티션 {} × 사본 {}, 최소 ISR {} (컨트롤러 broker-{})",
+                            t.name(), t.partitions(), t.replicationFactor(), t.minInsyncReplicas(), m.controllerId());
                     return;
                 }
             } catch (IOException e) {

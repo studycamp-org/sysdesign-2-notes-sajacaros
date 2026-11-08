@@ -89,6 +89,15 @@ final class LogSegment {
         return data.array();
     }
 
+    /** offset 부터 뒤를 잘라낸다 (그 offset 은 남지 않는다). */
+    void truncateTo(long offset) throws IOException {
+        int keep = (int) Math.max(0, Math.min(count, offset - baseOffset));
+        long newBytes = keep == count ? bytes : positions[keep];
+        channel.truncate(newBytes);
+        count = keep;
+        bytes = newBytes;
+    }
+
     private void addPosition(long pos) {
         if (count == positions.length) positions = Arrays.copyOf(positions, count * 2);
         positions[count++] = pos;
