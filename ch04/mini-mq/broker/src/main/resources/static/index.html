@@ -37,6 +37,12 @@
   .sendbar .grp { display: flex; gap: 4px; align-items: center; }
   #banner { background: var(--card); border: 2px solid var(--line); border-radius: 8px; margin: 2px 0 6px; padding: 5px 10px;
             font-size: 13px; line-height: 1.45; min-height: 34px; }
+  .tabs { display: flex; gap: 6px; margin: -2px 0 10px; border-bottom: 1px solid var(--line); }
+  .tabs button { border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: none; padding: 6px 12px; font-size: 13.5px; font-weight: 600; }
+  .tabs button.active { border-bottom-color: var(--accent); color: var(--accent); }
+  .tabs button .muted { font-weight: 400; font-size: 12px; }
+  .full-only { }
+  body[data-view="simple"] .full-only { display: none; }
   .flowwrap { position: relative; }
   svg { width: 100%; height: auto; display: block; }
   svg text { fill: var(--ink); font-family: inherit; }
@@ -72,6 +78,10 @@
 </header>
 <main>
   <section class="card">
+    <div class="tabs" id="tabs">
+      <button data-view="simple" onclick="setView('simple')">① 기본 흐름 <span class="muted">생산자 → 파티션 → 소비자</span></button>
+      <button data-view="full" onclick="setView('full')">② 브로커 · 복제 <span class="muted">리더·팔로워 · 조정 서비스</span></button>
+    </div>
     <div class="sendbar" id="sendbar"></div>
     <div id="banner"><span class="muted">위 버튼으로 메시지를 보내면 그 한 건이 지나가는 단계를 천천히 보여 준다. 생산자는 같은 파티션 묶음이 5건 차야 실제로 보낸다 (덜 찬 묶음은 "지금 보내기").</span></div>
     <div class="flowwrap">
@@ -79,9 +89,9 @@
       <svg id="overlay" viewBox="0 0 1160 600" aria-hidden="true"></svg>
     </div>
     <div class="legend">
-      <span><i style="border-color:var(--data)"></i>데이터: 메시지가 움직임 (생산 · 복제 · 소비)</span>
-      <span><i style="border-color:var(--ctrl);border-top-style:dashed"></i>컨트롤: 조정 서비스 세션 박동 · 지도(/metadata) · HW · ACK · 오프셋 커밋(/offsets)</span>
-      <span>사본 줄: <b>★</b> 리더 · 실선 ISR · 점선 ISR 밖 · 같은 색 = 같은 파티션</span>
+      <span><i style="border-color:var(--data)"></i>데이터: 메시지가 움직임 (생산 · <span class="full-only">복제 · </span>소비)</span>
+      <span class="full-only"><i style="border-color:var(--ctrl);border-top-style:dashed"></i>컨트롤: 조정 서비스 세션 박동 · 지도(/metadata) · HW · ACK · 오프셋 커밋(/offsets)</span>
+      <span class="full-only">사본 줄: <b>★</b> 리더 · 실선 ISR · 점선 ISR 밖 · 같은 색 = 같은 파티션</span>
     </div>
   </section>
 
@@ -135,6 +145,16 @@ const STEP_ICON = {map: '🗺', buffered: '🧺', dispatched: '🧭', stored: '�
 const kindTag = k => `<span class="kind" style="background:var(--${k})">${k === 'data' ? '데이터' : '컨트롤'}</span>`;
 
 let SEG = {};
+let VIEW = (() => { try { return localStorage.getItem('minimq.view') || 'simple'; } catch (e) { return 'simple'; } })();
+function setView(v) {
+  VIEW = v;
+  try { localStorage.setItem('minimq.view', v); } catch (e) { /* 저장 못 해도 된다 */ }
+  document.body.dataset.view = v;
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('active', b.dataset.view === v));
+  if (replay.on && replay.mode === 'election' && v !== 'full') stopReplay();
+  document.getElementById('overlay').innerHTML = '';
+  if (lastState) draw(lastState);
+}
 let lastState = null;
 const replay = {on: false, k: 0, playing: false, timer: null, stepMs: 1600, mode: 'trace', steps: [], election: null};
 let currentTrace = new URLSearchParams(location.search).get('trace');
@@ -215,6 +235,7 @@ function startReplay(mode) {
   if (mode) replay.mode = mode;
   if (!lastState) return;
   if (replay.mode === 'election') {
+    if (VIEW !== 'full') setView('full'); // 선거는 브로커·조정 서비스가 있는 ② 에서 보여 준다
     const el = lastElection(lastState);
     if (!el) { banner(null, '아직 기록된 선거가 없다 (조정 서비스는 최근 120개 기록만 남긴다)', 'ctrl'); return; }
     replay.steps = el.steps; replay.election = el;
@@ -406,10 +427,39 @@ function draw(s) {
   let back = '', mid = '', front = '', tracePath = '';
   SEG = {};
 
-  // ---- 가운데: 브로커 상자 안에 사본
-  const PX = 600, PW = 340, HEADH = 50, RH = 32, TOPH = 20;
-  const BOX = {}, ROW = {};
-  const ZK = {x: PX - PW / 2, y: 30, w: PW, h: 124};
+  // ---- 가운데. ① 기본 흐름: 토픽의 파티션만 / ② 브로커·복제: 브로커 상자 안에 리더·팔로워 사본, 조정 서비스
+  const full = VIEW === 'full';
+  const PX = 600, PW = 340;
+  const BOX = {}, ROW = {}; // ROW[`${파티션}|${리더}`] = 생산자·소비자 선이 닿는 높이
+  let ZK = null, brokersH = 0;
+  const rowL = (key, b) => [PX - PW / 2 + 10, ROW[`${key}|${b}`]];
+  const rowR = (key, b) => [PX + PW / 2 - 10, ROW[`${key}|${b}`]];
+  const head = b => BOX[b] ? BOX[b].y + 22 : null;
+  if (!full) {
+    let y = 30;
+    const RH = 40;
+    topics.forEach(t => {
+      mid += `<text x="${PX - PW / 2}" y="${y + 14}" font-size="13" font-weight="700">${esc(t.name)} <tspan font-weight="400" font-size="11.5" fill="var(--muted)">파티션 ${t.partitions.length}개 · 순서는 파티션 안에서만</tspan></text>`;
+      y += 24;
+      t.partitions.forEach(p => {
+        const key = `${t.name}-${p.partition}`, cy = y + RH / 2, col = partColor(t.name, p.partition);
+        ROW[`${key}|${p.leader}`] = cy;
+        const lead = (reps[key] || {})[p.leader], n = lead ? lead.highWatermark : null;
+        const traced = tr && tr.key === key, stored = traced && tr.has('stored');
+        const x0 = PX - PW / 2;
+        mid += `<rect x="${x0}" y="${y}" width="${PW}" height="${RH}" rx="9" fill="${col}" fill-opacity=".1" stroke="${stored ? 'var(--data)' : col}" stroke-width="${stored ? 3 : 1.4}"/>
+          <rect x="${x0}" y="${y}" width="7" height="${RH}" rx="3" fill="${col}"/>
+          <text x="${x0 + 16}" y="${cy + 5}" font-size="14" font-weight="700">${key}</text>
+          ${traced ? `<text x="${x0 + 92}" y="${cy + 5}" font-size="12" font-weight="700" fill="var(--data)">📨 offset ${tr.t.offset}</text>` : ''}
+          <text x="${x0 + PW - 12}" y="${cy + 5}" text-anchor="end" font-size="11.5" fill="var(--muted)">${n == null ? '리더 응답 없음' : n ? `메시지 ${n}건 (offset 0~${n - 1})` : '비어 있음'}</text>`;
+        y += RH + 8;
+      });
+      y += 14;
+    });
+    brokersH = y;
+  } else {
+  const HEADH = 50, RH = 32, TOPH = 20;
+  ZK = {x: PX - PW / 2, y: 30, w: PW, h: 124};
   let y = ZK.y + ZK.h + 26;
   Object.keys(meta.brokers).map(Number).sort((a, b) => a - b).forEach(b => {
     const n = nodes.find(x => x.id === b) || {id: b};
@@ -459,11 +509,8 @@ function draw(s) {
     mid += `</g>`;
     y += h + 22;
   });
-  const brokersH = y;
+  brokersH = y;
   GEO = {PX, PW, BOX, ZK};
-  const rowL = (key, b) => [PX - PW / 2 + 10, ROW[`${key}|${b}`]];
-  const rowR = (key, b) => [PX + PW / 2 - 10, ROW[`${key}|${b}`]];
-  const head = b => BOX[b] ? BOX[b].y + 22 : null;
 
   // ---- 조정 서비스 (ZooKeeper-lite) 상자와 브로커 세션 선
   const zk = s.zk || {};
@@ -511,6 +558,7 @@ function draw(s) {
         <title>${key}: broker-${p.leader} → broker-${f} 복제 (팔로워가 가져감) ${st ? `· ${lag}건 뒤, ${(st.lastFetchAgoMs / 1000).toFixed(1)}초 전` : '· 아직 안 옴'}</title></path>`;
     });
   }));
+  } // ② 끝
 
   // ---- 왼쪽: 생산자 (🧺 버퍼 → 🧭 라우팅)
   const QX = 160, QW = 290, SLOT = 15;
@@ -564,7 +612,7 @@ function draw(s) {
         stroke-dasharray="8 6" opacity="${traced ? 1 : rate ? 0.85 : 0.3}" ${anim(rate)}><title>${pr.name} → ${key} 의 리더 broker-${p.leader}</title></path>`;
     });
     // 지도: 조정 서비스의 /metadata (컨트롤러가 씀) → 브로커가 들고 있다가 생산자에게 → 라우팅 (컨트롤)
-    {
+    if (full) {
       const d = `M${ZK.x},${ZK.y + 84} C${QX + 80},${ZK.y + 84} ${x0 + QW - 40},${routY - 30} ${x0 + QW - 40},${routY}`;
       if (mineTopic) SEG.map = d;
       const traced = mineTopic && tr.has('map');
@@ -619,6 +667,7 @@ function draw(s) {
           SEG[`committed|group ${g.group}`] = d;
           if (tr.has('committed', 'group ' + g.group)) tracePath += `<path d="${d}" fill="none" stroke="var(--ctrl)" stroke-width="2.4" stroke-dasharray="3 5"><title>오프셋 커밋: 코디네이터 broker-${g.coordinator} 를 거쳐 ZooKeeper-lite /offsets 에 기록</title></path>`;
         }
+        if (!full && tr && tr.key && tr.key.startsWith(g.topic + '-') && m.assigned.includes(tr.t.partition)) SEG[`committed|group ${g.group}`] = [mx + NW / 2 - 20, my];
         const tag = m.id.slice(m.id.lastIndexOf('#'));
         const sub = idle ? (g.state === 'STABLE' ? '놀고 있음 (파티션 < 소비자)' : '배정 기다리는 중') : `파티션 ${m.assigned.join(',')} · lag ${mlag}`;
         front += `<g opacity="${idle ? 0.5 : 1}">
@@ -640,12 +689,12 @@ function draw(s) {
     const pm = (meta.topics[tr.t.topic] || {partitions: []}).partitions[tr.t.partition];
     if (pm && ROW[`${tr.key}|${pm.leader}`]) {
       SEG.stored = [PX + PW / 2 - 30, ROW[`${tr.key}|${pm.leader}`]];
-      SEG.hw = [PX - PW / 2 + 152, ROW[`${tr.key}|${pm.leader}`]];
+      SEG.hw = full ? [PX - PW / 2 + 152, ROW[`${tr.key}|${pm.leader}`]] : null; // ① 에선 복제·HW 를 그리지 않는다 (자막·타임라인으로만)
     }
   }
 
   const heads = `<text x="${QX}" y="18" text-anchor="middle" font-size="12" fill="var(--muted)">생산자 (클라이언트 라이브러리)</text>
-    <text x="${PX}" y="18" text-anchor="middle" font-size="12" fill="var(--muted)">브로커 (파티션 사본)</text>
+    <text x="${PX}" y="18" text-anchor="middle" font-size="12" fill="var(--muted)">${full ? '브로커 (파티션 사본) · 조정 서비스' : '토픽 · 파티션'}</text>
     <text x="${CXc}" y="18" text-anchor="middle" font-size="12" fill="var(--muted)">소비자 그룹</text>`;
   const fullH = Math.max(brokersH, qy, gy) + 10;
   const el = document.getElementById('flow');
@@ -736,6 +785,8 @@ document.getElementById('flow').addEventListener('click', async (e) => {
   const q = new URLSearchParams({group: b.dataset.group, member: b.dataset.member, cmd: b.dataset.cmd});
   await fetch('/admin/cluster/group-command?' + q, {method: 'POST'}).catch(() => {});
 });
+const qv = new URLSearchParams(location.search).get('view'); // ?view=simple | full
+setView(qv === 'full' || qv === 'simple' ? qv : VIEW);
 refresh().then(() => { // ?trace=…&replay=1 (한 건) 또는 ?replay=election (최근 선거)
   const r = new URLSearchParams(location.search).get('replay');
   if (r === 'election') startReplay('election'); else if (r) startReplay('trace');
