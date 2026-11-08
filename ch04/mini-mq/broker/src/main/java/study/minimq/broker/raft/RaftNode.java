@@ -113,7 +113,7 @@ public final class RaftNode {
             accepted = committed = ClusterMetadata.initial(members);
         }
         resetElectionDeadline();
-        event("시작 (term " + currentTerm + ", 메타데이터 v" + committed.version() + ")");
+        event("start", null, "시작 (term " + currentTerm + ", 메타데이터 v" + committed.version() + ")");
     }
 
     // ------------------------------------------------------------------ 시계
@@ -188,12 +188,12 @@ public final class RaftNode {
         failPending();
         persist();
         resetElectionDeadline();
-        event("선거 타임아웃 → term " + currentTerm + " 후보로 출마");
+        event("timeout", null, "선거 타임아웃 → term " + currentTerm + " 후보로 출마 (자기 자신에게 1표)");
     }
 
     private synchronized void onVoteResponse(long term, int peer, VoteResponse r) {
         if (r.term() > currentTerm) {
-            stepDown(r.term(), null, "broker-" + peer + " 에게서 더 높은 term " + r.term() + " 을 봄 → 팔로워로");
+            stepDown(r.term(), null, "stepdown", peer, "broker-" + peer + " 에게서 더 높은 term " + r.term() + " 을 봄 → 팔로워로");
             return;
         }
         if (role != Role.CANDIDATE || currentTerm != term || !r.granted()) return;
@@ -208,7 +208,7 @@ public final class RaftNode {
         long now = clock.getAsLong();
         peers.keySet().forEach(p -> lastAck.put(p, now));
         nextHeartbeat = 0;
-        event("과반(" + votes + "/" + clusterSize + "표) 획득 → term " + currentTerm + " 리더 = 컨트롤러");
+        event("elected", null, "과반(" + votes + "/" + clusterSize + "표) 획득 → term " + currentTerm + " 리더 = 컨트롤러");
         // Raft: 새 리더는 자기 term 의 항목을 하나 커밋해야 이전 항목도 커밋할 수 있다.
         // 그 항목으로 "컨트롤러는 나, epoch 는 이번 term" 을 기록한다.
         proposeLocked(m -> m.withController(id, currentTerm));
@@ -218,7 +218,7 @@ public final class RaftNode {
         checkNotIsolated();
         if (r.term() < currentTerm) return new VoteResponse(currentTerm, false);
         if (r.term() > currentTerm) {
-            stepDown(r.term(), null, "broker-" + r.candidateId() + " 의 더 높은 term " + r.term() + " 을 봄");
+            stepDown(r.term(), null, "stepdown", r.candidateId(), "broker-" + r.candidateId() + " 의 더 높은 term " + r.term() + " 을 봄");
         }
         boolean upToDate = r.lastMetaTerm() > accepted.term()
                 || (r.lastMetaTerm() == accepted.term() && r.lastMetaVersion() >= accepted.version());
@@ -227,10 +227,10 @@ public final class RaftNode {
             votedFor = r.candidateId();
             persist();
             resetElectionDeadline();
-            event("broker-" + r.candidateId() + " 에게 투표 (term " + r.term() + ")");
+            event("vote", r.candidateId(), "broker-" + r.candidateId() + " 에게 투표 (term " + r.term() + ")");
             return new VoteResponse(currentTerm, true);
         }
-        event("broker-" + r.candidateId() + " 에게 투표 거절: "
+        event("deny", r.candidateId(), "broker-" + r.candidateId() + " 에게 투표 거절: "
                 + (!upToDate ? "후보의 메타데이터 v" + r.lastMetaVersion() + " 가 내 v" + accepted.version() + " 보다 뒤처짐"
                 : "이번 term 에 이미 broker-" + votedFor + " 에게 투표함"));
         return new VoteResponse(currentTerm, false);
@@ -243,11 +243,11 @@ public final class RaftNode {
         rpc.debug("append ← {} term {} (마감까지 {}ms)", r.leaderId(), r.term(), electionDeadline - clock.getAsLong());
         if (r.term() < currentTerm) {
             // 낡은 리더(좀비 컨트롤러)의 명령은 거부한다 = 펜싱. 응답의 term 을 보고 그쪽이 내려간다
-            event("낡은 term " + r.term() + " 의 broker-" + r.leaderId() + " 박동 거부 (지금 term " + currentTerm + ")");
+            event("reject", r.leaderId(), "낡은 term " + r.term() + " 의 broker-" + r.leaderId() + " 박동 거부 (지금 term " + currentTerm + ")");
             return new AppendResponse(currentTerm, false, accepted.version());
         }
         if (r.term() > currentTerm || role != Role.FOLLOWER || !Objects.equals(leaderId, r.leaderId())) {
-            stepDown(r.term(), r.leaderId(), "broker-" + r.leaderId() + " 를 리더로 따름 (term " + r.term() + ")");
+            stepDown(r.term(), r.leaderId(), "follow", r.leaderId(), "broker-" + r.leaderId() + " 를 리더로 따름 (term " + r.term() + ")");
         }
         resetElectionDeadline();
         if (r.metadata() != null && !r.metadata().equals(accepted)) {
@@ -264,7 +264,7 @@ public final class RaftNode {
 
     private synchronized void onAppendResponse(long term, int peer, AppendResponse r) {
         if (r.term() > currentTerm) {
-            stepDown(r.term(), null, "broker-" + peer + " 가 더 높은 term " + r.term() + " 을 알려 줌 → 컨트롤러에서 내려옴");
+            stepDown(r.term(), null, "stepdown", peer, "broker-" + peer + " 가 더 높은 term " + r.term() + " 을 알려 줌 → 컨트롤러에서 내려옴");
             return;
         }
         if (role != Role.LEADER || currentTerm != term) return;
@@ -307,14 +307,14 @@ public final class RaftNode {
     private void commit(ClusterMetadata m) {
         committed = m;
         persist();
-        event("메타데이터 v" + m.version() + " 커밋");
+        event("commit", null, "메타데이터 v" + m.version() + " 커밋" + (m.controllerId() == id && m.controllerEpoch() == currentTerm ? " (컨트롤러 = 나, epoch " + currentTerm + ")" : ""));
         ClusterMetadata snapshot = m;
         notifier.execute(() -> listeners.forEach(l -> l.accept(snapshot)));
     }
 
     // ------------------------------------------------------------------ 도우미
 
-    private void stepDown(long term, Integer newLeader, String reason) {
+    private void stepDown(long term, Integer newLeader, String kind, Integer peer, String reason) {
         boolean changed = term > currentTerm || role != Role.FOLLOWER || !Objects.equals(leaderId, newLeader);
         if (term > currentTerm) {
             currentTerm = term;
@@ -325,7 +325,7 @@ public final class RaftNode {
         failPending();
         persist();
         resetElectionDeadline();
-        if (changed) event(reason);
+        if (changed) event(kind, peer, reason);
     }
 
     private void failPending() {
@@ -348,7 +348,11 @@ public final class RaftNode {
     }
 
     private void event(String text) {
-        events.addFirst(new RaftEvent(clock.getAsLong(), ++eventSeq, id, currentTerm, text));
+        event("note", null, text);
+    }
+
+    private void event(String kind, Integer peer, String text) {
+        events.addFirst(new RaftEvent(clock.getAsLong(), ++eventSeq, id, currentTerm, kind, peer, text));
         log.info("[term {}] {}", currentTerm, text);
         while (events.size() > MAX_EVENTS) events.removeLast();
     }

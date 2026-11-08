@@ -87,7 +87,7 @@
 
   <div class="two">
     <section>
-      <h2>📨 한 건의 여정 <span class="muted" id="trTitle"></span>
+      <h2>⏪ 천천히 보기 <span class="muted" id="trTitle"></span>
         <span class="tctl">
           <button onclick="startReplay()" title="기록된 단계를 처음부터 천천히 다시 보여 준다">▶ 다시 재생</button>
           <button onclick="pauseReplay()">⏸</button>
@@ -136,7 +136,7 @@ const kindTag = k => `<span class="kind" style="background:var(--${k})">${k === 
 
 let SEG = {};
 let lastState = null;
-const replay = {on: false, k: 0, playing: false, timer: null, stepMs: 1600};
+const replay = {on: false, k: 0, playing: false, timer: null, stepMs: 1600, mode: 'trace', steps: [], election: null};
 let currentTrace = new URLSearchParams(location.search).get('trace');
 
 // ------------------------------------------------------------------ 버튼
@@ -152,7 +152,7 @@ async function sendFrom(name, count) {
       currentTrace = r.ids[r.ids.length - 1]; // 마지막 한 건을 따라간다
       stopReplay();
       await refresh();
-      setTimeout(startReplay, 300);
+      setTimeout(() => startReplay('trace'), 300);
     }
   } catch (e) { banner(null, `${name} 에 보내기 실패`, 'ctrl'); }
 }
@@ -179,7 +179,11 @@ function sendbar(s) {
       <button class="send" ${p.reachable && p.ready ? '' : 'disabled'} onclick="sendFrom('${esc(p.name)}', 1)">1건</button>
       <button class="send" ${p.reachable && p.ready ? '' : 'disabled'} onclick="sendFrom('${esc(p.name)}', 5)">5건</button>
       <button ${p.reachable && p.ready ? '' : 'disabled'} onclick="flushFrom('${esc(p.name)}')" title="덜 찬 묶음도 지금 리더에게 보낸다">지금 보내기</button></span>`).join('');
-  if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
+  const el2 = lastElection(s);
+  const elect = `<span class="grp">👑 컨트롤러 선출 ${el2 ? `<span class="muted">최근: term ${el2.E.term} broker-${el2.E.node} (${time(el2.E.at)})</span>` : ''}
+      <button class="send" style="background:var(--ctrl);border-color:var(--ctrl)" ${el2 ? '' : 'disabled'} onclick="startReplay('election')">천천히 보기</button></span>`;
+  const all = html + elect;
+  if (el.dataset.html !== all) { el.innerHTML = all; el.dataset.html = all; }
 }
 
 // ------------------------------------------------------------------ 한 건 추적
@@ -197,73 +201,178 @@ function traceOf(s) {
     has: (step, who) => all.some(e => e.step === step && (who === undefined || e.who === who))};
 }
 function visibleTrace(tr) {
-  if (!tr || !replay.on) return tr;
+  if (!tr || !replay.on || replay.mode !== 'trace') return tr;
   const ev = tr.all.slice(0, replay.k);
   return {...tr, events: ev, has: (step, who) => ev.some(e => e.step === step && (who === undefined || e.who === who))};
 }
 
-// ------------------------------------------------------------------ 천천히 재생
-function startReplay() {
-  if (!lastState || !traceOf(lastState)) return;
+// ------------------------------------------------------------------ 천천히 재생 (한 건 또는 선거)
+// mode = 'trace': 메시지 한 건의 기록 / 'election': 가장 최근 컨트롤러 선출의 Raft 이벤트
+const RAFT_ICON = {timeout: '⏱', vote: '🗳', deny: '✋', stepdown: '⬇', elected: '👑', follow: '🤝', reject: '⛔', commit: '📜', isolate: '🔌', start: '▶'};
+let GEO = null; // 마지막으로 그린 브로커 상자 위치
+
+function steps() { return replay.mode === 'election' ? replay.steps : (traceOf(lastState) || {all: []}).all; }
+function startReplay(mode) {
+  if (mode) replay.mode = mode;
+  if (!lastState) return;
+  if (replay.mode === 'election') {
+    const el = lastElection(lastState);
+    if (!el) { banner(null, '아직 기록된 선거가 없다 (브로커 이벤트는 최근 40개만 남는다)', 'ctrl'); return; }
+    replay.steps = el.steps; replay.election = el;
+  } else if (!traceOf(lastState)) return;
   pauseReplay();
   replay.on = true; replay.k = 0; replay.playing = true;
   stepNext();
 }
 function pauseReplay() { replay.playing = false; clearTimeout(replay.timer); }
-function nextStep() { pauseReplay(); if (!replay.on) { replay.on = true; replay.k = 0; } stepNext(true); }
+function nextStep() { pauseReplay(); if (!replay.on) { startReplay(); pauseReplay(); return; } stepNext(true); }
 function stopReplay() {
   pauseReplay(); replay.on = false;
   document.getElementById('overlay').innerHTML = '';
   if (lastState) { draw(lastState); traceView(lastState, traceOf(lastState)); }
 }
 function stepNext(manual) {
-  const tr = traceOf(lastState);
-  if (!tr) return;
-  if (replay.k >= tr.all.length) {
-    if (tr.done) { replay.playing = false; banner(null, `끝: ${tr.all.length}단계, 실제로는 ${tr.all.at(-1).at - tr.all[0].at}ms 걸렸다`, 'data'); return; }
-    const last = tr.all.at(-1);
+  const list = steps();
+  if (replay.k >= list.length) {
+    if (replay.mode === 'election') {
+      replay.playing = false;
+      const E = replay.election.E;
+      banner(null, `끝: broker-${E.node} 가 term ${E.term} 컨트롤러가 됐다. ${list.length}단계, 실제로는 ${list.at(-1).at - list[0].at}ms`, 'ctrl');
+      return;
+    }
+    const tr = traceOf(lastState);
+    if (tr && tr.done) { replay.playing = false; banner(null, `끝: ${list.length}단계, 실제로는 ${list.at(-1).at - list[0].at}ms 걸렸다`, 'data'); return; }
+    const last = list.at(-1);
     if (last && last.step === 'buffered') banner(null, '⏳ 생산자 버퍼에서 기다리는 중: 같은 파티션 묶음이 5건이 차면 보낸다 (지금 보내려면 "지금 보내기")', 'data');
     if (replay.playing || manual) replay.timer = setTimeout(() => stepNext(manual), 400);
     return;
   }
-  const e = tr.all[replay.k++];
-  draw(lastState); traceView(lastState, tr);
-  playStep(e, tr);
+  const e = list[replay.k++];
+  draw(lastState); traceView(lastState, traceOf(lastState));
+  if (replay.mode === 'election') playElection(e, list[0].at); else playStep(e, list[0].at);
   if (replay.playing) replay.timer = setTimeout(stepNext, replay.stepMs);
 }
 function banner(e, text, kind, t0) {
   const b = document.getElementById('banner');
   b.style.borderColor = `var(--${kind})`;
-  b.innerHTML = e ? `${kindTag(kind)} <b>${replay.k}.</b> ${STEP_ICON[e.step] || ''} ${esc(e.text)} <span class="muted">(실제 +${e.at - t0}ms)</span>` : esc(text);
-}
-function playStep(e, tr) {
-  const kind = STEP_KIND[e.step] || 'ctrl';
-  banner(e, '', kind, tr.all[0].at);
-  const ov = document.getElementById('overlay');
-  const seg = SEG[e.step + '|' + e.who] || SEG[e.step === 'acked' ? 'dispatched' : e.step];
-  const dur = replay.stepMs * 0.75, color = `var(--${kind})`;
-  if (Array.isArray(seg)) {
-    const [x, y] = seg;
-    ov.innerHTML = `<circle id="ring" cx="${x}" cy="${y}" r="6" fill="none" stroke="${color}" stroke-width="3"/><circle cx="${x}" cy="${y}" r="7" fill="${color}" stroke="#fff" stroke-width="2"/>`;
-    const ring = ov.querySelector('#ring'), t0 = performance.now();
-    const tick = now => { const t = ((now - t0) % 700) / 700; ring.setAttribute('r', 7 + 18 * t); ring.setAttribute('opacity', 1 - t); if (now - t0 < dur) requestAnimationFrame(tick); };
-    requestAnimationFrame(tick);
-    return;
+  if (!e) { b.innerHTML = esc(text); return; }
+  if (replay.mode === 'election') {
+    b.innerHTML = `${kindTag('ctrl')} <b>${replay.k}.</b> ${RAFT_ICON[e.kind] || '•'} <span class="dot" style="background:${C(e.node)}"></span> <b>broker-${e.node}</b>: ${esc(e.text)} <span class="muted">(term ${e.term}, 실제 +${e.at - t0}ms)</span>`;
+  } else {
+    b.innerHTML = `${kindTag(kind)} <b>${replay.k}.</b> ${STEP_ICON[e.step] || ''} ${esc(e.text)} <span class="muted">(실제 +${e.at - t0}ms)</span>`;
   }
-  if (!seg) { ov.innerHTML = ''; return; }
-  const back = e.step === 'acked'; // ACK 는 리더에서 생산자 쪽으로 거꾸로 온다
-  ov.innerHTML = `<path id="rp" d="${seg}" fill="none" stroke="${color}" stroke-width="6" stroke-opacity=".3" stroke-dasharray="${kind === 'ctrl' ? '6 5' : ''}"/>
+}
+
+// 점 하나를 경로를 따라 움직인다. pingpong 이면 갔다가 돌아온다 (요청 → 응답)
+function moveDot(base, d, color, dash, opts = {}) {
+  const ov = document.getElementById('overlay');
+  ov.innerHTML = base + `<path id="rp" d="${d}" fill="none" stroke="${color}" stroke-width="6" stroke-opacity=".3" stroke-dasharray="${dash}"/>
     <circle id="dot" r="8" fill="${color}" stroke="#fff" stroke-width="2"/>`;
   const path = ov.querySelector('#rp'), dot = ov.querySelector('#dot');
-  const len = path.getTotalLength(), t0 = performance.now();
+  const len = path.getTotalLength(), t0 = performance.now(), dur = replay.stepMs * 0.8;
+  const ease = u => u < .5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
   const tick = now => {
-    const t = Math.min(1, (now - t0) / dur), u = back ? 1 - t : t;
-    const ease = u < .5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
-    const pt = path.getPointAtLength(len * ease);
+    const t = Math.min(1, (now - t0) / dur);
+    let u;
+    if (opts.pingpong) { u = t < .5 ? ease(t * 2) : ease(2 - t * 2); if (t >= .5 && opts.backColor) dot.setAttribute('fill', opts.backColor); }
+    else u = opts.back ? 1 - ease(t) : ease(t);
+    const pt = path.getPointAtLength(len * u);
     dot.setAttribute('cx', pt.x); dot.setAttribute('cy', pt.y);
     if (t < 1) requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
+}
+function pulse(base, x, y, color) {
+  const ov = document.getElementById('overlay');
+  ov.innerHTML = base + `<circle id="ring" cx="${x}" cy="${y}" r="6" fill="none" stroke="${color}" stroke-width="3"/><circle cx="${x}" cy="${y}" r="7" fill="${color}" stroke="#fff" stroke-width="2"/>`;
+  const ring = ov.querySelector('#ring'), t0 = performance.now(), dur = replay.stepMs * 0.8;
+  const tick = now => { const t = ((now - t0) % 700) / 700; ring.setAttribute('r', 7 + 18 * t); ring.setAttribute('opacity', 1 - t); if (now - t0 < dur) requestAnimationFrame(tick); };
+  requestAnimationFrame(tick);
+}
+
+function playStep(e, t0) {
+  const kind = STEP_KIND[e.step] || 'ctrl';
+  banner(e, '', kind, t0);
+  const seg = SEG[e.step + '|' + e.who] || SEG[e.step === 'acked' ? 'dispatched' : e.step];
+  const color = `var(--${kind})`;
+  if (Array.isArray(seg)) return pulse('', seg[0], seg[1], color);
+  if (!seg) { document.getElementById('overlay').innerHTML = ''; return; }
+  moveDot('', seg, color, kind === 'ctrl' ? '6 5' : '', {back: e.step === 'acked'});
+}
+
+// ---------------- 선거
+/** 가장 최근 당선(elected)과 그 앞의 출마부터 당선 뒤 커밋까지. */
+function lastElection(s) {
+  const ev = s.nodes.filter(n => n.reachable).flatMap(n => n.raft.events)
+    .sort((a, b) => a.at - b.at || (a.node === b.node ? a.seq - b.seq : a.node - b.node));
+  const elected = ev.filter(e => e.kind === 'elected');
+  if (!elected.length) return null;
+  const E = elected.at(-1), prev = elected.length > 1 ? elected.at(-2).at : 0;
+  const first = ev.find(e => e.kind === 'timeout' && e.at > prev && e.at <= E.at && e.at >= E.at - 20000);
+  const start = first ? first.at : E.at - 3000;
+  const KEEP = new Set(['timeout', 'vote', 'deny', 'stepdown', 'elected', 'follow', 'reject', 'commit', 'isolate']);
+  let commits = 0;
+  const list = ev.filter(e => e.at >= start && e.at <= E.at + 2000 && KEEP.has(e.kind))
+    .filter(e => e.kind !== 'commit' || (e.at >= E.at && commits++ < 3));
+  return {E, steps: list};
+}
+/** 단계 k 까지 적용한 각 브로커의 상태 (역할·term·투표). */
+function electionState(list, k, ids) {
+  const st = {};
+  ids.forEach(b => { st[b] = {role: '팔로워', term: null, voted: null, votes: 0, leader: null}; });
+  list.slice(0, k).forEach(e => {
+    const n = (st[e.node] ||= {role: '팔로워', votes: 0});
+    if (e.term > (n.term ?? -1)) { n.voted = null; n.leader = null; }
+    n.term = e.term;
+    if (e.kind === 'timeout') { n.role = '후보'; n.votes = 1; n.voted = e.node; }
+    if (e.kind === 'vote') {
+      n.role = '팔로워'; n.voted = e.peer;
+      const c = st[e.peer];
+      if (c && c.role === '후보' && c.term === e.term) c.votes++;
+    }
+    if (e.kind === 'stepdown') { n.role = '팔로워'; n.votes = 0; }
+    if (e.kind === 'elected') n.role = '리더';
+    if (e.kind === 'follow') { n.role = '팔로워'; n.leader = e.peer; n.votes = 0; }
+  });
+  return st;
+}
+/** 재생 중: 브로커 상자 머리를 그 시점의 상태로 덮어 그린다 (지금의 결과가 미리 보이지 않게). */
+function electionBase(e) {
+  if (!GEO) return '';
+  const ids = Object.keys(GEO.BOX).map(Number);
+  const st = electionState(replay.steps, replay.k, ids);
+  return ids.map(b => {
+    const {y} = GEO.BOX[b], x0 = GEO.PX - GEO.PW / 2, n = st[b];
+    const label = n.role === '리더' ? `👑 컨트롤러 · term ${n.term}`
+      : n.role === '후보' ? `🗳 후보 · term ${n.term} · ${n.votes}표 (과반 ${Math.floor(ids.length / 2) + 1})`
+      : `팔로워${n.term != null ? ` · term ${n.term}` : ''}${n.voted && n.voted !== b ? ` · broker-${n.voted} 에게 투표` : ''}${n.leader ? ` · broker-${n.leader} 따름` : ''}`;
+    const color = n.role === '리더' ? 'var(--accent)' : n.role === '후보' ? 'var(--warn)' : 'var(--muted)';
+    const active = e && (e.node === b || e.peer === b);
+    return `<rect x="${x0 + 2}" y="${y + 2}" width="${GEO.PW - 4}" height="44" rx="10" fill="var(--card)"/>
+      <rect x="${x0}" y="${y}" width="${GEO.PW}" height="${GEO.BOX[b].h}" rx="12" fill="none" stroke="${active ? 'var(--ctrl)' : 'none'}" stroke-width="3.5"/>
+      <text x="${x0 + 14}" y="${y + 21}" font-weight="700" font-size="14">broker-${b}</text>
+      <text x="${x0 + 92}" y="${y + 21}" font-size="12.5" font-weight="700" fill="${color}">${esc(label)}</text>
+      <text x="${x0 + 14}" y="${y + 39}" font-size="11" fill="var(--muted)">⏪ 재생 중: 그 시점의 상태</text>`;
+  }).join('');
+}
+function headPt(b) { return [GEO.PX - GEO.PW / 2, GEO.BOX[b].y + 22]; }
+function arc(a, b) {
+  const [x, y1] = headPt(a), [, y2] = headPt(b), bulge = 50 + Math.abs(y2 - y1) / 7;
+  return `M${x},${y1} C${x - bulge},${y1} ${x - bulge},${y2} ${x},${y2}`;
+}
+function playElection(e, t0) {
+  banner(e, '', 'ctrl', t0);
+  const base = electionBase(e);
+  if (!GEO || !GEO.BOX[e.node]) { document.getElementById('overlay').innerHTML = base; return; }
+  const has = e.peer != null && GEO.BOX[e.peer];
+  if ((e.kind === 'vote' || e.kind === 'deny') && has) // 후보 → 투표자(요청) → 후보(찬성/거절)
+    return moveDot(base, arc(e.peer, e.node), 'var(--ctrl)', '6 5', {pingpong: true, backColor: e.kind === 'vote' ? 'var(--ok)' : 'var(--bad)'});
+  if ((e.kind === 'follow' || e.kind === 'stepdown') && has) // 리더의 박동 / 더 높은 term 을 실은 메시지
+    return moveDot(base, arc(e.peer, e.node), 'var(--ctrl)', '6 5');
+  if (e.kind === 'reject' && has)
+    return moveDot(base, arc(e.peer, e.node), 'var(--bad)', '6 5', {pingpong: true});
+  const [x, y] = headPt(e.node);
+  pulse(base, x + 20, y, e.kind === 'elected' ? 'var(--accent)' : e.kind === 'timeout' ? 'var(--warn)' : 'var(--ctrl)');
 }
 
 // ------------------------------------------------------------------ 그림
@@ -335,6 +444,7 @@ function draw(s) {
     y += h + 22;
   });
   const brokersH = y;
+  GEO = {PX, PW, BOX};
   const rowL = (key, b) => [PX - PW / 2 + 10, ROW[`${key}|${b}`]];
   const rowR = (key, b) => [PX + PW / 2 - 10, ROW[`${key}|${b}`]];
   const head = b => BOX[b] ? BOX[b].y + 22 : null;
@@ -511,6 +621,15 @@ function draw(s) {
 // ------------------------------------------------------------------ 표·타임라인
 function traceView(s, tr) {
   const body = document.getElementById('trace');
+  if (replay.on && replay.mode === 'election') {
+    const list = replay.steps, t0 = list.length ? list[0].at : 0, E = replay.election.E;
+    document.getElementById('trTitle').textContent = `👑 선거: term ${E.term} 에 broker-${E.node} 당선`;
+    body.innerHTML = list.map((e, i) => {
+      const cls = i >= replay.k ? 'future' : i === replay.k - 1 ? 'cur' : '';
+      return `<tr class="${cls}"><td>+${e.at - t0}ms</td><td>${kindTag('ctrl')}${RAFT_ICON[e.kind] || '•'} <span class="dot" style="background:${C(e.node)}"></span> broker-${e.node}: ${esc(e.text)}</td></tr>`;
+    }).join('');
+    return;
+  }
   if (!tr) return;
   document.getElementById('trTitle').textContent = tr.t ? `${tr.id} · ${tr.t.topic}-${tr.t.partition} offset ${tr.t.offset}` : tr.id;
   const all = tr.all, t0 = all.length ? all[0].at : 0;
@@ -573,7 +692,10 @@ document.getElementById('flow').addEventListener('click', async (e) => {
   const q = new URLSearchParams({group: b.dataset.group, member: b.dataset.member, cmd: b.dataset.cmd});
   await fetch('/admin/cluster/group-command?' + q, {method: 'POST'}).catch(() => {});
 });
-refresh().then(() => { if (new URLSearchParams(location.search).has('replay')) startReplay(); }); // ?trace=…&replay=1
+refresh().then(() => { // ?trace=…&replay=1 (한 건) 또는 ?replay=election (최근 선거)
+  const r = new URLSearchParams(location.search).get('replay');
+  if (r === 'election') startReplay('election'); else if (r) startReplay('trace');
+});
 setInterval(refresh, 1000);
 </script>
 </body>
