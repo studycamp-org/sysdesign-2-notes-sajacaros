@@ -22,7 +22,13 @@
   header { padding: 10px 20px; border-bottom: 1px solid var(--line); display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
   h1 { font-size: 17px; margin: 0; }
   .muted { color: var(--muted); font-size: 13px; }
-  main { padding: 12px 20px 30px; display: grid; gap: 16px; max-width: 1280px; }
+  main { padding: 12px 20px 30px; display: grid; gap: 16px; max-width: 1760px; }
+  /* 흐름 그림 오른쪽에 단계 목록 (새 단계가 위). 좁은 화면에선 아래로 */
+  .stage { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) 420px; align-items: start; }
+  .side { position: sticky; top: 8px; }
+  .side h2 { margin-top: 0; }
+  .side .card { max-height: calc(100vh - 110px); overflow: auto; }
+  @media (max-width: 1300px) { .stage { grid-template-columns: 1fr; } .side { position: static; } .side .card { max-height: none; } }
   h2 { font-size: 13px; margin: 0 0 6px; color: var(--muted); font-weight: 600; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
   .tools { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; }
@@ -79,6 +85,7 @@
   <span class="muted" id="updated"></span>
 </header>
 <main>
+  <div class="stage">
   <section class="card">
     <div class="tabs" id="tabs">
       <button data-view="simple" onclick="setView('simple')">① 기본 흐름</button>
@@ -91,14 +98,12 @@
       <svg id="overlay" viewBox="0 0 1160 600" aria-hidden="true"></svg>
     </div>
     <div class="legend">
-      <span><i style="border-color:var(--data)"></i>데이터: 메시지가 움직임 (생산 · <span class="full-only">복제 · </span>소비). 소비는 소비자가 ⇠ fetch 로 가져감</span>
+      <span><i style="border-color:var(--data)"></i>데이터: 메시지가 움직임 (생산 · <span class="full-only">복제 · </span>소비)</span>
       <span><i style="border-color:var(--ctrl);border-top-style:dashed"></i>컨트롤: 일어날 때만 그림</span>
       <span class="full-only">사본 줄: <b>★</b> 리더 · 실선 ISR · 점선 ISR 밖 · 같은 색 = 같은 파티션</span>
     </div>
   </section>
-
-  <div class="two">
-    <section>
+  <aside class="side">
       <h2>⏪ 천천히 보기 <span class="muted" id="trTitle"></span>
         <span class="tctl">
           <button onclick="startReplay()" title="기록된 단계를 처음부터 천천히 다시 보여 준다">▶ 다시 재생</button>
@@ -109,7 +114,12 @@
             <option value="4500">느리게</option><option value="3000" selected>보통</option><option value="1600">빠르게</option></select>
         </span></h2>
       <div class="card"><table class="trace"><tbody id="trace"><tr class="wait"><td></td><td>아직 보낸 메시지가 없다.</td></tr></tbody></table></div>
-      <h2 style="margin-top:14px">이벤트</h2>
+  </aside>
+  </div>
+
+  <div class="two">
+    <section>
+      <h2>이벤트</h2>
       <div class="card"><table class="events"><tbody id="events"></tbody></table></div>
     </section>
     <section>
@@ -179,16 +189,21 @@ async function act(action, id, value) {
   setTimeout(refresh, 300);
 }
 
+// 지도 없이 처음 보낼 때: 버튼을 누르고 재생이 시작되기 전(약 1초)에 라우팅 칸이 먼저 채워져 보이지 않게 붙잡아 둔다
+const holdNoMap = {};
 async function sendFrom(name, count) {
+  const before = lastState && (lastState.producers || []).find(p => p.name === name);
+  if (before && before.metadataVersion == null) holdNoMap[name] = true;
   try {
     const r = await (await fetch(`/admin/producers/${encodeURIComponent(name)}/send?count=${count}`, {method: 'POST'})).json();
     if (r.ids && r.ids.length) {
       currentTrace = r.ids[r.ids.length - 1]; // 마지막 한 건을 따라간다
       stopReplay();
       await refresh();
-      setTimeout(() => startReplay('trace'), 300);
-    }
-  } catch (e) { banner(null, `${name} 에 보내기 실패`, 'ctrl'); }
+      setTimeout(() => { startReplay('trace'); delete holdNoMap[name]; }, 300);
+    } else delete holdNoMap[name];
+  } catch (e) {
+    delete holdNoMap[name]; banner(null, `${name} 에 보내기 실패`, 'ctrl'); }
 }
 
 async function resetProducer(name) {
@@ -235,6 +250,14 @@ function traceOf(s) {
     .sort((a, b) => a.at - b.at || (a.broker === b.broker ? a.seq - b.seq : 0));
   const seen = new Set();
   const all = events.filter(e => { const k = e.step + '|' + e.who; if (seen.has(k)) return false; seen.add(k); return true; });
+  // 이야기 순서로: 생산자 쪽(지도 → 버퍼 → 라우팅 → 저장 → acks=1 이면 ACK) → 복제 → HW → (acks=all 이면 ACK) → 그룹마다 가져감 → 커밋
+  // 시각 순서만 따르면 생산자가 ACK 를 늦게 알아채 복제·가져감 뒤에 끼고, 두 그룹의 가져감·커밋이 뒤섞인다
+  const groupOf = e => e.step === 'committed' ? e.who.replace(/^group /, '') : (/^consumer-(.+)-[^-]+$/.exec(e.who) || [0, e.who])[1];
+  const groups = all.filter(e => e.step === 'fetched').sort((a, b) => a.at - b.at).map(groupOf).filter((g, i, a) => a.indexOf(g) === i);
+  const rank = e => ({map: 0, buffered: 1, dispatched: 2, stored: 3, replicated: 4, hw: 5, failed: 99}[e.step]
+    ?? (e.step === 'acked' ? (/acks=all/.test(e.text) ? 5.5 : 3.5)
+    : 6 + 2 * Math.max(0, groups.indexOf(groupOf(e))) + (e.step === 'committed' ? 1 : 0)));
+  all.sort((a, b) => rank(a) - rank(b) || a.at - b.at);
   const done = all.some(e => e.step === 'committed' || e.step === 'failed')
     || (all.length && all.at(-1).step !== 'buffered' && Date.now() - all.at(-1).at > 30000);
   return {id: currentTrace, t, all, events: all, done, key: t ? `${t.topic}-${t.partition}` : null,
@@ -298,7 +321,7 @@ function banner(e, text, kind, t0) {
   b.style.borderColor = `var(--${kind})`;
   if (!e) { b.innerHTML = esc(text); return; }
   if (replay.mode === 'election') {
-    b.innerHTML = (e.kind === 'seen' || e.kind === 'applied')
+    b.innerHTML = (e.kind === 'seen' || e.kind === 'applied' || e.kind === 'empty')
       ? `${kindTag('ctrl')} <b>${replay.k}.</b> ${ZK_ICON[e.kind]} ${esc(e.text)} <span class="muted">(실제 +${e.at - t0}ms)</span>`
       : e.kind.startsWith('route')
       ? `${kindTag('ctrl')} <b>${replay.k}.</b> 🗺 ${esc(e.text)}${e.data ? ` <code>${esc(e.data)}</code>` : ''} <span class="muted">(실제 +${e.at - t0}ms)</span>`
@@ -332,9 +355,10 @@ function moveDot(base, d, color, dash, opts = {}) {
   };
   requestAnimationFrame(tick);
 }
-function pulse(base, x, y, color) {
+function pulse(base, x, y, color, label) {
   const ov = document.getElementById('overlay');
-  ov.innerHTML = base + `<circle id="ring" cx="${x}" cy="${y}" r="6" fill="none" stroke="${color}" stroke-width="3"/><circle cx="${x}" cy="${y}" r="7" fill="${color}" stroke="#fff" stroke-width="2"/>`;
+  ov.innerHTML = base + `<circle id="ring" cx="${x}" cy="${y}" r="6" fill="none" stroke="${color}" stroke-width="3"/><circle cx="${x}" cy="${y}" r="7" fill="${color}" stroke="#fff" stroke-width="2"/>`
+    + (label ? tag(x, y - 22, label, color) : '');
   const ring = ov.querySelector('#ring'), t0 = performance.now(), dur = replay.stepMs * 0.6;
   const tick = now => { const t = ((now - t0) % 700) / 700; ring.setAttribute('r', 7 + 18 * t); ring.setAttribute('opacity', 1 - t); if (now - t0 < dur) requestAnimationFrame(tick); };
   requestAnimationFrame(tick);
@@ -343,14 +367,24 @@ function pulse(base, x, y, color) {
 function playStep(e, t0) {
   const kind = STEP_KIND[e.step] || 'ctrl';
   banner(e, '', kind, t0);
-  const seg = SEG[e.step + '|' + e.who] || SEG[e.step === 'acked' ? 'dispatched' : e.step];
+  const base = traceRouteBase();
+  const fm = e.step === 'map' && traceFirstMap();
+  if (fm && fm.broker && GEO.BOX[fm.broker]) { // 지도가 없어 처음 받음: 생산자 → 아무 브로커 → 지도
+    const [sx, sy] = GEO.ROUTE[fm.pr.name], bx = GEO.PX - GEO.PW / 2, by = GEO.BOX[fm.broker].y + 22;
+    return moveDot(base, `M${sx},${sy} C${sx},${sy - 60} ${bx - 70},${by} ${bx},${by}`, 'var(--ctrl)', '6 5',
+      {pingpong: true, backColor: 'var(--ok)', label: 'GET /metadata', backLabel: `지도 v${fm.m.version}`});
+  }
+  let seg = SEG[e.step + '|' + e.who] || SEG[e.step === 'acked' ? 'dispatched' : e.step];
   const color = `var(--${kind})`;
-  if (Array.isArray(seg)) return pulse('', seg[0], seg[1], color);
-  if (!seg) { document.getElementById('overlay').innerHTML = ''; return; }
+  // ① 탭엔 팔로워 줄이 없다: 복제·HW 는 리더 줄에서 이름표로 보여 준다 (빈 단계가 생기지 않게)
+  if (!seg && (e.step === 'replicated' || e.step === 'hw') && SEG.stored) seg = SEG.stored;
+  const PULSE_TAG = {stored: '💾 저장 (아직 소비자는 못 봄)', replicated: `📋 ${e.who} 복제`, hw: '✅ HW ↑ 이제 소비 가능', map: '🗺 지도', buffered: '🧺 버퍼'};
+  if (Array.isArray(seg)) return pulse(base, seg[0], seg[1], color, PULSE_TAG[e.step]);
+  if (!seg) { document.getElementById('overlay').innerHTML = base; return; }
   // 가져감 = 풀: 소비자가 GET /fetch 를 보내고(청록) 리더가 메시지를 돌려준다(금색)
-  if (e.step === 'fetched') return moveDot('', seg, 'var(--ctrl)', '6 5', {pingpong: true, backColor: 'var(--data)', label: 'GET /fetch', backLabel: '메시지'});
+  if (e.step === 'fetched') return moveDot(base, seg, 'var(--ctrl)', '6 5', {pingpong: true, backColor: 'var(--data)', label: '기다리던 GET /fetch', backLabel: '메시지 ↩'});
   const STEP_TAG = {dispatched: 'POST /produce', replicated: '팔로워 fetch', acked: 'ACK', committed: 'POST /offsets'};
-  moveDot('', seg, color, kind === 'ctrl' ? '6 5' : '', {back: e.step === 'acked', label: STEP_TAG[e.step]});
+  moveDot(base, seg, color, kind === 'ctrl' ? '6 5' : '', {back: e.step === 'acked', label: STEP_TAG[e.step]});
 }
 
 // ---------------- 선거 (조정 서비스의 기록으로): 세션 만료 → /controller 삭제 → 감시 알림 → 먼저 만드는 브로커가 컨트롤러
@@ -377,6 +411,14 @@ function lastElection(s) {
     // 기다리던 브로커가 없으면 알림 기록이 없다 → 순번만 보면 한참 뒤의 다른 알림을 집으므로 1초 안의 것만
     const n = ev.find(e => e.kind === 'notify' && e.seq > st.seq && e.seq <= st.seq + 3 && e.at - st.at < 1000);
     if (n && !steps.some(x => x.seq === n.seq)) steps.push({...n, node: 0});
+  });
+  // /controller 를 만들려 한 브로커(👑·✋)는 그 전에 get /controller 로 비어 있음을 봤다 (브로커 쪽 기록)
+  steps.filter(e => e.kind === 'created' || e.kind === 'create_conflict').forEach(c => {
+    const n = s.nodes.find(x => x.id === c.node && x.reachable);
+    const em = n && ((n.coord || {}).events || []).filter(x => x.kind === 'controller_empty' && x.at <= c.at + 50 && x.at >= c.at - 3000)
+      .sort((a, b) => b.at - a.at)[0];
+    if (em) steps.push({kind: 'empty', at: Math.min(em.at, c.at - 1), node: c.node, who: 'broker-' + c.node,
+      text: `broker-${c.node} 가 get /controller → 비어 있음(NO_NODE) → 내가 만들어 본다`});
   });
   // /controller 를 만들려 하지 않은 브로커: 읽어 보니 이미 주인이 있어 감시만 했다 (조정 서비스는 읽기를 기록하지 않아 브로커 쪽 기록으로)
   const tried = new Set(steps.filter(e => e.kind === 'created' || e.kind === 'create_conflict').map(e => e.node));
@@ -426,7 +468,7 @@ function lastElection(s) {
   steps.sort((a, b) => a.at - b.at);
   return {E: {...E, node: who2id(E.who), term: E.zxid}, steps};
 }
-const ZK_ICON = {session_expired: '💀', deleted: '🗑', notify: '🔔', create_conflict: '✋', created: '👑', set: '📜', route: '🗺', route_none: '🗺', seen: '👀', applied: '🗺'};
+const ZK_ICON = {session_expired: '💀', deleted: '🗑', notify: '🔔', create_conflict: '✋', created: '👑', set: '📜', route: '🗺', route_none: '🗺', seen: '👀', applied: '🗺', empty: '🔍'};
 /** 단계 k 까지 적용한 상태: /controller 주인, 브로커별 세션. */
 function electionState(list, k, ids) {
   const st = {holder: null, brokers: {}};
@@ -478,14 +520,41 @@ function routeBase() {
   replay.steps.forEach((st, i) => {
     if (!st.kind || !st.kind.startsWith('route') || !GEO.ROUTE[st.who]) return;
     const done = replay.k > i, m = st.kind === 'route' && done ? st.got : st.prev;
-    const [sx, sy] = GEO.ROUTE[st.who], x = sx - 240, w = 270;
-    const parts = m && m.summary ? m.summary.slice(m.summary.indexOf(' ') + 1) : '';
-    out += `<rect x="${x + 1}" y="${sy + 1}" width="${w - 2}" height="46" rx="8" fill="var(--bg)" stroke="${done && st.kind === 'route' ? 'var(--bad)' : 'var(--line)'}" stroke-width="${done && st.kind === 'route' ? 2 : 1}"/>
-      <text x="${x + 10}" y="${sy + 17}" font-size="12" font-weight="700">🧭 라우팅 <tspan font-weight="400" font-size="10.5" fill="var(--muted)">⏪ 그 시점</tspan></text>
-      <text x="${x + w - 10}" y="${sy + 17}" text-anchor="end" font-size="10.5" font-weight="700" fill="${m ? 'var(--bad)' : 'var(--muted)'}">${m ? `지도 v${m.version}` : '지도 없음'}</text>
-      <text x="${x + 10}" y="${sy + 36}" font-size="11" fill="var(--muted)">${m ? esc(parts) : '처음 보낼 때 받는다'}</text>`;
+    out += routeBox(GEO.ROUTE[st.who], m, done && st.kind === 'route');
   });
   return out;
+}
+/** 재생 중 라우팅 칸 하나: m = {version, summary} 또는 null(지도 없음). hot = 방금 받음(빨간 테두리) */
+function routeBox([sx, sy], m, hot) {
+  const x = sx - 240, w = 270, parts = m && m.summary ? m.summary.slice(m.summary.indexOf(' ') + 1) : '';
+  return `<rect x="${x + 1}" y="${sy + 1}" width="${w - 2}" height="46" rx="8" fill="var(--bg)" stroke="${hot ? 'var(--bad)' : 'var(--line)'}" stroke-width="${hot ? 2 : 1}"/>
+    <text x="${x + 10}" y="${sy + 17}" font-size="12" font-weight="700">🧭 라우팅 <tspan font-weight="400" font-size="10.5" fill="var(--muted)">⏪ 그 시점</tspan></text>
+    <text x="${x + w - 10}" y="${sy + 17}" text-anchor="end" font-size="10.5" font-weight="700" fill="${m ? 'var(--bad)' : 'var(--muted)'}">${m ? `지도 v${m.version}` : '지도 없음'}</text>
+    <text x="${x + 10}" y="${sy + 36}" font-size="11" fill="var(--muted)">${m ? esc(parts) : '처음 보낼 때 받는다'}</text>`;
+}
+/** 메시지 재생: 첫 전송이면 지도 단계 전엔 "지도 없음", 지도 단계에선 받은 지도(빨강). 그 뒤엔 지금 그림 그대로 */
+function traceFirstMap() {
+  const tr = traceOf(lastState);
+  if (!tr) return null;
+  const i = tr.all.findIndex(e => e.step === 'map' && /처음 받음/.test(e.text));
+  if (i < 0) return null;
+  // 메시지가 아직 버퍼에 있으면(저장 전) 토픽 정보가 없다 → 지도 단계 자막의 생산자 이름으로 찾는다
+  const pr = (lastState.producers || []).find(p => tr.all[i].text.includes(p.name + ' '));
+  if (!pr || !GEO || !GEO.ROUTE || !GEO.ROUTE[pr.name]) return null;
+  const e = tr.all[i], v = (/메타데이터 v(\d+)/.exec(e.text) || [])[1];
+  // 그때 지도를 준 브로커: 브로커가 남긴 GET /metadata 기록 중 이 생산자의 가장 가까운 것
+  const f = lastState.nodes.filter(n => n.reachable).flatMap(n => (n.metaFetches || []).map(x => ({...x, broker: n.id})))
+    .filter(x => x.client === pr.name && Math.abs(x.at - e.at) < 5000).sort((a, b) => Math.abs(a.at - e.at) - Math.abs(b.at - e.at))[0];
+  const m = {version: v || (f && f.version) || pr.metadataVersion,
+    summary: f ? f.summary : `${pr.topic} ` + Object.entries(pr.leaders || {}).map(([p, l]) => `p${p}→b${l}`).join(' ')};
+  return {i, pr, m, broker: f ? f.broker : null};
+}
+function traceRouteBase() {
+  if (!replay.on || replay.mode !== 'trace') return '';
+  const fm = traceFirstMap();
+  if (!fm || replay.k > fm.i + 2) return ''; // 그 뒤엔 지금 그림이 곧 그 시점
+  // 지도 단계(요청이 오가는 동안)까진 "지도 없음", 바로 다음 단계에서 받은 지도를 빨갛게 한 번 보여 준다
+  return replay.k <= fm.i + 1 ? routeBox(GEO.ROUTE[fm.pr.name], null, false) : routeBox(GEO.ROUTE[fm.pr.name], fm.m, true);
 }
 function zkPt() { const Z = GEO.ZK; return [Z.x + Z.w, Z.y + Z.h / 2]; }
 function brokerPt(b) { return [GEO.PX + GEO.PW / 2, GEO.BOX[b].y + 22]; }
@@ -503,6 +572,7 @@ function playElection(e, t0) {
       label: 'create /controller', backLabel: e.kind === 'created' ? 'OK → 👑' : '이미 있음'});
   if (e.kind === 'set' && has) return moveDot(base, zkPath(b), 'var(--ctrl)', '6 5', {label: 'set /metadata'}); // 새 컨트롤러가 /metadata 에 "컨트롤러 = 나"
   if (e.kind === 'applied' && has) return moveDot(base, zkPath(b), 'var(--ctrl)', '6 5', {back: true, label: `get /metadata → v${e.version ?? '?'}`}); // 조정 서비스 → 브로커: 새 지도
+  if (e.kind === 'empty' && has) return moveDot(base, zkPath(b), 'var(--ctrl)', '6 5', {pingpong: true, label: 'get /controller', backLabel: '비어 있음'});
   if (e.kind === 'seen' && has) return moveDot(base, zkPath(b), 'var(--ctrl)', '6 5', {pingpong: true, label: 'get /controller', backLabel: `이미 broker-${replay.election.E.node}`}); // 읽기 → 이미 있음
   if (e.kind === 'notify') { // 조정 서비스 → 기다리던 브로커들
     const ids = Object.keys(GEO.BOX).map(Number), st = electionState(replay.steps, replay.k, ids);
@@ -747,11 +817,12 @@ function draw(s) {
       }
     }
     if (!SEG.buffered && mineTopic) SEG.buffered = [x0 + 46 + 2 * (SLOT + 4), bufY + 25 + tr.t.partition * 22 + SLOT / 2];
-    const leaders = pr.leaders || {};
+    const noMap = pr.metadataVersion == null || holdNoMap[pr.name]; // 붙잡아 둔 동안은 "지도 없음"
+    const leaders = noMap ? {} : pr.leaders || {};
     front += `<rect x="${x0 + 10}" y="${routY}" width="${QW - 20}" height="${routH}" rx="8" fill="var(--bg)" stroke="var(--line)"/>
       <text x="${x0 + 20}" y="${routY + 17}" font-size="12" font-weight="700">🧭 라우팅</text>
-      <text x="${x0 + QW - 20}" y="${routY + 17}" text-anchor="end" font-size="10.5" fill="${pr.metadataVersion == null ? 'var(--muted)' : 'var(--ctrl)'}">${pr.metadataVersion == null ? '지도 없음' : `지도 v${pr.metadataVersion}`}</text>
-      <text x="${x0 + 20}" y="${routY + 36}" font-size="11" fill="var(--muted)">${pr.metadataVersion == null ? '처음 보낼 때 받는다' : Object.entries(leaders).map(([p, l]) => `p${p}→b${l}`).join('  ')}</text></g>`;
+      <text x="${x0 + QW - 20}" y="${routY + 17}" text-anchor="end" font-size="10.5" fill="${noMap ? 'var(--muted)' : 'var(--ctrl)'}">${noMap ? '지도 없음' : `지도 v${pr.metadataVersion}`}</text>
+      <text x="${x0 + 20}" y="${routY + 36}" font-size="11" fill="var(--muted)">${noMap ? '처음 보낼 때 받는다' : Object.entries(leaders).map(([p, l]) => `p${p}→b${l}`).join('  ')}</text></g>`;
     // 라우팅 → 각 파티션 리더 (데이터)
     const routeX = x0 + QW - 10, routeY = routY + routH / 2;
     let produceTagged = false;
@@ -762,6 +833,7 @@ function draw(s) {
       const d = curve(routeX, routeY, ...rowL(key, lead));
       if (tr && tr.key === key) SEG.dispatched = d;
       const traced = tr && tr.key === key && tr.has('dispatched');
+      if (!traced && !rate) return; // 평소엔 안 그린다: 묶음을 보낼 때만
       if ((traced || rate) && !produceTagged) { tags += edgeTag(d, 'POST /produce', 'var(--data)', 0.45); produceTagged = true; }
       back += `<path d="${d}" fill="none" stroke="${traced ? 'var(--data)' : partColor(pr.topic, p.partition)}" stroke-width="${traced ? 3.2 : width(rate)}"
         stroke-dasharray="8 6" opacity="${traced ? 1 : rate ? 0.85 : 0.3}" ${anim(rate)}><title>${pr.name} → ${key} 의 리더 broker-${lead} (생산자의 지도 기준)</title></path>`;
@@ -772,7 +844,7 @@ function draw(s) {
     if (mineTopic) SEG.map = [x0 + QW - 70, routY + 14]; // 한 건 추적의 🗺 단계 = 캐시한 지도를 본다 (요청 없음)
     const asked = traffic.filter(t => t.kind === 'metadata' && t.client === pr.name && t.agoMs < RECENT).sort((a, b) => a.agoMs - b.agoMs)[0];
     // 선출 재생 중엔 그 시점의 라우팅을 따로 그리므로 지금의 지도 요청은 숨긴다 (헷갈리지 않게)
-    if (asked && BOX[asked.broker] && !(replay.on && replay.mode === 'election')) {
+    if (asked && BOX[asked.broker] && !replay.on && !holdNoMap[pr.name]) {
       const sx = x0 + QW - 40, sy = routY, bx = PX - PW / 2, by = head(asked.broker);
       // 요청은 생산자 → 브로커지만 실제로 흐르는 건 응답(지도): 선은 브로커 → 생산자 방향으로 흘러가게 그린다
       const gd = `M${bx},${by} C${bx - 70},${by} ${sx},${sy - 60} ${sx},${sy}`;
@@ -826,6 +898,7 @@ function draw(s) {
           const d = curve(PX + PW / 2, ROW[`${key}|${pm.leader}`], mx - NW / 2, my);
           if (tr && tr.key === key) SEG[`fetched|${m.clientId}`] = curve(mx - NW / 2, my, PX + PW / 2, ROW[`${key}|${pm.leader}`]); // 소비자 → 리더 (요청 방향)
           const traced = tr && tr.key === key && fetched;
+          if (!traced && !r) return; // 평소엔 안 그린다: 롱 폴링은 늘 걸려 있지만 메시지가 오갈 때만 (맡은 파티션은 멤버 칸의 p0,1)
           if (traced || r) tags += edgeTag(d, 'GET /fetch ⇄ 메시지', traced ? 'var(--data)' : partColor(g.topic, p), 0.7);
           back += `<path d="${d}" fill="none" stroke="${traced ? 'var(--data)' : partColor(g.topic, p)}" stroke-width="${traced ? 3.2 : width(r)}" stroke-dasharray="8 6"
             opacity="${traced ? 1 : r ? 0.85 : 0.3}" ${anim(r)}><title>${key} 의 리더 broker-${pm.leader} → ${m.id}</title></path>`;
@@ -837,7 +910,6 @@ function draw(s) {
           SEG[`committed|group ${g.group}`] = d;
           if (tr.has('committed', 'group ' + g.group)) tracePath += `<path d="${d}" fill="none" stroke="var(--ctrl)" stroke-width="2.4" stroke-dasharray="3 5"><title>오프셋 커밋: 코디네이터 broker-${g.coordinator} 를 거쳐 ZooKeeper-lite /offsets 에 기록</title></path>`;
         }
-        if (!idle) front += `<text x="${mx - NW / 2 - 4}" y="${my - 6}" text-anchor="end" font-size="10" font-weight="600" fill="var(--ctrl)"><title>풀 방식: 소비자가 리더에게 GET /fetch 로 요청하고, 리더는 메시지를 답으로 준다 (롱 폴링: 없으면 최대 1초 기다렸다 답함)</title>⇠ fetch</text>`;
         const tag = m.id.slice(m.id.lastIndexOf('#'));
         const sub = idle ? (g.state === 'STABLE' ? '놀고 있음' : '배정 대기') : `p${m.assigned.join(',')} · lag ${mlag}`;
         front += `<g opacity="${idle ? 0.5 : 1}">
@@ -880,23 +952,25 @@ function traceView(s, tr) {
     const list = replay.steps, t0 = list.length ? list[0].at : 0, E = replay.election.E;
     document.getElementById('trTitle').textContent = `👑 컨트롤러 선출: broker-${E.node} 가 /controller 를 차지 (zxid ${E.term})`;
     body.innerHTML = list.map((e, i) => {
-      const cls = i >= replay.k ? 'future' : i === replay.k - 1 ? 'cur' : '';
-      return `<tr class="${cls}"><td>+${e.at - t0}ms</td><td>${kindTag('ctrl')}${ZK_ICON[e.kind] || '•'} ${esc(e.text)}${e.data ? ` <code>${esc(e.data)}</code>` : ''}</td></tr>`;
-    }).join('');
+      if (i >= replay.k) return ''; // 아직 재생 전인 단계는 숨긴다
+      const cls = i === replay.k - 1 ? 'cur' : '';
+      return `<tr class="${cls}"><td>${i + 1}. +${e.at - t0}ms</td><td>${kindTag('ctrl')}${ZK_ICON[e.kind] || '•'} ${esc(e.text)}${e.data ? ` <code>${esc(e.data)}</code>` : ''}</td></tr>`;
+    }).reverse().join('') || '<tr class="wait"><td></td><td>재생을 시작하는 중…</td></tr>';
     return;
   }
   if (!tr) return;
   document.getElementById('trTitle').textContent = tr.t ? `${tr.id} · ${tr.t.topic}-${tr.t.partition} offset ${tr.t.offset}` : tr.id;
   const all = tr.all, t0 = all.length ? all[0].at : 0;
   let rows = all.map((e, i) => {
+    if (replay.on && i >= replay.k) return ''; // 아직 재생 전인 단계는 숨긴다
     const k = STEP_KIND[e.step] || 'ctrl';
-    const cls = !replay.on ? '' : i >= replay.k ? 'future' : i === replay.k - 1 ? 'cur' : '';
+    const cls = replay.on && i === replay.k - 1 ? 'cur' : '';
     const where = e.broker > 0 ? `<span class="dot" style="background:${C(e.broker)}" title="broker-${e.broker} 에서 기록"></span>` : `<span class="dot" style="background:var(--data)" title="생산자에서 기록"></span>`;
-    return `<tr class="${cls}"><td>+${e.at - t0}ms</td><td>${kindTag(k)}${STEP_ICON[e.step] || '•'} ${where} ${esc(e.text)}</td></tr>`;
-  }).join('');
+    return `<tr class="${cls}"><td>${i + 1}. +${e.at - t0}ms</td><td>${kindTag(k)}${STEP_ICON[e.step] || '•'} ${where} ${esc(e.text)}</td></tr>`;
+  }).reverse().join(''); // 새 단계가 위
   if (!replay.on && !tr.done) {
     const last = all.at(-1);
-    rows += `<tr class="wait"><td>…</td><td>${last && last.step === 'buffered' ? '생산자 버퍼에서 기다리는 중 (묶음이 5건 차면 보냄, 또는 "지금 보내기")' : '다음 단계를 기다리는 중'}</td></tr>`;
+    rows = `<tr class="wait"><td>…</td><td>${last && last.step === 'buffered' ? '생산자 버퍼에서 기다리는 중 (묶음이 5건 차면 보냄, 또는 "지금 보내기")' : '다음 단계를 기다리는 중'}</td></tr>` + rows;
   }
   body.innerHTML = rows || '<tr class="wait"><td></td><td>기록을 모으는 중…</td></tr>';
 }

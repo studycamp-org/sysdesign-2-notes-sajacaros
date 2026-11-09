@@ -215,7 +215,7 @@ public class ReplicaManager {
         r.followers.put(replicaId, new FollowerState(offset, System.currentTimeMillis()));
         // 팔로워가 offset 을 달라고 왔다 = 그 앞까지는 이미 받아 저장했다
         traces.hit(topic, partition, 0, offset, "replicated", "broker-" + replicaId,
-                "broker-" + replicaId + " 가 offset {offset} 을 복제함 (리더에서 가져감)");
+                "팔로워 broker-" + replicaId + " 가 offset {offset} 을 복제함 (팔로워도 리더에게 fetch 로 가져간다)");
         maybeAdvanceHighWatermark(r);
         return r.log.awaitLogEnd(offset + 1)
                 .completeOnTimeout(null, waitMs, TimeUnit.MILLISECONDS)
@@ -239,7 +239,7 @@ public class ReplicaManager {
         long next = Math.min(hw, r.log.logEndOffset());
         if (next > r.log.highWatermark()) {
             traces.hit(r.topic, r.partition, 0, next, "hw", "",
-                    "HW 가 offset {offset} 을 넘음 → ISR " + r.meta.isr() + " 전원에 있음, 소비 가능");
+                    "HW 가 offset {offset} 을 넘음: ISR " + r.meta.isr() + " 전원이 가졌으니 이제 소비자에게 보여 줘도 된다 (기다리던 GET /fetch 가 깨어남)");
         }
         r.log.advanceHighWatermark(hw);
     }

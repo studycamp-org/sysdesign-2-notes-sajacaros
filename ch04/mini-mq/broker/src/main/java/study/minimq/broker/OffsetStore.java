@@ -46,8 +46,9 @@ public class OffsetStore {
                 for (OffsetCommit c : commits) {
                     coord.putOffset(c.group(), c.topic(), c.partition(), c.offset());
                     traces.hit(c.topic(), c.partition(), 0, c.offset() + 1, "committed", "group " + c.group(),
-                            "그룹 " + c.group() + " 의 코디네이터 broker-" + props.brokerId() + " 가 ZooKeeper-lite /offsets/" + c.group() + "/"
-                                    + c.topic() + "/" + c.partition() + " = " + c.offset() + " 로 기록 → {offset} 처리 끝");
+                            "그룹 " + c.group() + " 가 offset " + c.offset() + " 까지 처리했다고 커밋 → 코디네이터 broker-" + props.brokerId()
+                                    + " 가 /offsets/" + c.group() + "/" + c.topic() + "/" + c.partition() + " = " + c.offset()
+                                    + " 로 기록 (그룹이 다시 시작하면 " + (c.offset() + 1) + " 부터 읽는다)");
                 }
             } catch (IOException e) {
                 throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "조정 서비스에 오프셋을 못 씀: " + e.getMessage());

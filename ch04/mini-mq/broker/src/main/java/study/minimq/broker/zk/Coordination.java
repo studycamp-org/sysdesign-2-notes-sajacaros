@@ -67,6 +67,7 @@ public final class Coordination {
     private volatile Long session;
     private volatile boolean isolated;
     private volatile long zxid;
+    private boolean emptyNoted; // "/controller 가 비어 있다" 를 한 번만 남기려고 (주인이 생기면 다시)
 
     public Coordination(int id, String myUrl, String zkUrl) {
         this.id = id;
@@ -167,9 +168,14 @@ public final class Coordination {
             if (!"NO_NODE".equals(e.code)) throw e;
         }
         if (cid == null) {
+            if (!emptyNoted && session != null && !isolated) {
+                event("controller_empty", "get /controller → 비어 있음(NO_NODE) → 내가 만들어 본다");
+                emptyNoted = true;
+            }
             tryBecomeController();
             return;
         }
+        emptyNoted = false;
         boolean me = cid == id && session != null;
         if (controller && !me) event("controller_lost", "/controller 의 주인이 broker-" + cid + " 로 바뀌었다 → 컨트롤러에서 내려옴");
         if (!controller && me) controllerSince = System.currentTimeMillis();
