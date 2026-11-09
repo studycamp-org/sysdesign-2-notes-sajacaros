@@ -96,7 +96,7 @@ public class BrokerApi {
             if (!r.messages().isEmpty()) {
                 long first = r.messages().get(0).offset(), last = r.messages().get(r.messages().size() - 1).offset();
                 traces.hit(topic, partition, first, last + 1, "fetched", String.valueOf(client),
-                        client + " 가 offset {offset} 을 가져감 (HW " + r.highWatermark() + " 앞까지만 받음)");
+                        client + " 가 GET /fetch 로 요청해 offset {offset} 을 가져감 (풀 방식: 소비자가 묻고 리더가 답한다. HW " + r.highWatermark() + " 앞까지만 받음)");
             }
             return r;
         });

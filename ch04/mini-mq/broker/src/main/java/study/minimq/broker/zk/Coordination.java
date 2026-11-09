@@ -186,6 +186,7 @@ public final class Coordination {
                 ClusterMetadata md = Json.MAPPER.readValue(m.data(), ClusterMetadata.class);
                 metadataZkVersion = m.version();
                 apply(md);
+                event("metadata_applied", "감시 알림을 받고 /metadata 를 다시 읽음 → 지도 v" + md.version() + " 사본 갱신 (컨트롤러 broker-" + md.controllerId() + ")");
             }
         } catch (ZkClient.ZkError e) {
             if (!"NO_NODE".equals(e.code)) throw e;
@@ -249,6 +250,7 @@ public final class Coordination {
                     zk.set(METADATA, Json.MAPPER.writeValueAsString(next), cur.version(), CONTROLLER, controllerEpoch);
                     metadataZkVersion = cur.version() + 1;
                     apply(next);
+                    event("metadata_applied", "내가 쓴 지도 v" + next.version() + " 를 내 사본에도 반영 (컨트롤러)");
                     f.complete(next);
                     return;
                 } catch (ZkClient.ZkError e) {

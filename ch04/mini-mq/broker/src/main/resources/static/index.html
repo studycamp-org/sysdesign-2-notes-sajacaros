@@ -46,7 +46,8 @@
   body[data-view="simple"] .full-only { display: none; }
   .flowwrap { position: relative; }
   svg { width: 100%; height: auto; display: block; }
-  svg text { fill: var(--ink); font-family: inherit; }
+  svg text { font-family: inherit; }
+  svg text:not([fill]) { fill: var(--ink); } /* fill 을 준 글자는 그 색으로 (예전엔 이 규칙이 덮어써 모두 검정이었다) */
   #overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
   .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 6px; }
   .legend i { display: inline-block; width: 22px; height: 0; border-top: 3px solid; vertical-align: middle; margin-right: 4px; }
@@ -90,7 +91,7 @@
       <svg id="overlay" viewBox="0 0 1160 600" aria-hidden="true"></svg>
     </div>
     <div class="legend">
-      <span><i style="border-color:var(--data)"></i>데이터: 메시지가 움직임 (생산 · <span class="full-only">복제 · </span>소비)</span>
+      <span><i style="border-color:var(--data)"></i>데이터: 메시지가 움직임 (생산 · <span class="full-only">복제 · </span>소비). 소비는 소비자가 ⇠ fetch 로 가져감</span>
       <span><i style="border-color:var(--ctrl);border-top-style:dashed"></i>컨트롤: 일어날 때만 그림</span>
       <span class="full-only">사본 줄: <b>★</b> 리더 · 실선 ISR · 점선 ISR 밖 · 같은 색 = 같은 파티션</span>
     </div>
@@ -105,7 +106,7 @@
           <button onclick="nextStep()" title="한 단계씩">⏭ 다음</button>
           <button onclick="stopReplay()" title="재생을 그만두고 전부 보기">■</button>
           <select id="stepMs" onchange="replay.stepMs = Number(this.value)" title="단계 사이 간격">
-            <option value="2600">느리게</option><option value="1600" selected>보통</option><option value="800">빠르게</option></select>
+            <option value="4500">느리게</option><option value="3000" selected>보통</option><option value="1600">빠르게</option></select>
         </span></h2>
       <div class="card"><table class="trace"><tbody id="trace"><tr class="wait"><td></td><td>아직 보낸 메시지가 없다.</td></tr></tbody></table></div>
       <h2 style="margin-top:14px">이벤트</h2>
@@ -135,6 +136,18 @@ const anim = (r) => {
   const dur = Math.max(0.35, 2.4 - 0.75 * Math.log10(1 + r));
   return `class="anim" style="animation-duration:${dur}s;animation-delay:-${(Date.now() / 1000) % dur}s"`;
 };
+// 선 위 이름표: 경로 "M x,y C x1,y1 x2,y2 x,y" 의 t 지점에 메시지 이름 (예: GET /fetch, POST /offsets)
+const bez = (d, t = 0.5) => {
+  const n = (d.match(/-?[\d.]+/g) || []).map(Number);
+  if (n.length < 8) return null;
+  const [x0, y0, x1, y1, x2, y2, x3, y3] = n, u = 1 - t;
+  const f = (a, b, c, e) => u * u * u * a + 3 * u * u * t * b + 3 * u * t * t * c + t * t * t * e;
+  return [f(x0, x1, x2, x3), f(y0, y1, y2, y3)];
+};
+const tagW = text => 12 + [...text].reduce((a, c) => a + (c.codePointAt(0) > 0x2e80 ? 11 : 6.3), 0);
+const tag = (x, y, text, color) => `<g><rect x="${x - tagW(text) / 2}" y="${y - 9}" width="${tagW(text)}" height="17" rx="8.5" fill="var(--card)" stroke="${color}" stroke-width="1.2"/>
+  <text x="${x}" y="${y + 3.5}" text-anchor="middle" font-size="10.5" font-weight="700" fill="${color}">${esc(text)}</text></g>`;
+const edgeTag = (d, text, color, t = 0.5) => { const p = bez(d, t); return p ? tag(p[0], p[1], text, color) : ''; };
 const curve = (x1, y1, x2, y2) => { const dx = (x2 - x1) * 0.5; return `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`; };
 // 같은 파티션의 사본은 같은 색 (토픽마다 색 계열을 달리)
 const PART_HUE = {logs: [28, 52, 4, 145, 205], orders: [200, 170, 232]};
@@ -152,12 +165,12 @@ function setView(v) {
   try { localStorage.setItem('minimq.view', v); } catch (e) { /* 저장 못 해도 된다 */ }
   document.body.dataset.view = v;
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('active', b.dataset.view === v));
-  if (replay.on && replay.mode === 'election' && v !== 'full') stopReplay();
+  if (replay.on && replay.mode === 'election') stopReplay(); // 상자 위치가 달라지므로 선거 재생은 멈춘다
   document.getElementById('overlay').innerHTML = '';
   if (lastState) draw(lastState);
 }
 let lastState = null;
-const replay = {on: false, k: 0, playing: false, timer: null, stepMs: 1600, mode: 'trace', steps: [], election: null};
+const replay = {on: false, k: 0, playing: false, timer: null, stepMs: 3000, mode: 'trace', steps: [], election: null};
 let currentTrace = new URLSearchParams(location.search).get('trace');
 
 // ------------------------------------------------------------------ 버튼
@@ -242,7 +255,7 @@ function startReplay(mode) {
   if (mode) replay.mode = mode;
   if (!lastState) return;
   if (replay.mode === 'election') {
-    if (VIEW !== 'full') setView('full'); // 선거는 브로커·조정 서비스가 있는 ② 에서 보여 준다
+    // 지금 보고 있는 탭에서 재생한다 (① 에도 브로커·조정 서비스 상자가 있다)
     const el = lastElection(lastState);
     if (!el) { banner(null, '아직 기록된 선거가 없다 (조정 서비스는 최근 120개 기록만 남긴다)', 'ctrl'); return; }
     replay.steps = el.steps; replay.election = el;
@@ -285,8 +298,8 @@ function banner(e, text, kind, t0) {
   b.style.borderColor = `var(--${kind})`;
   if (!e) { b.innerHTML = esc(text); return; }
   if (replay.mode === 'election') {
-    b.innerHTML = e.kind === 'seen'
-      ? `${kindTag('ctrl')} <b>${replay.k}.</b> 👀 ${esc(e.text)} <span class="muted">(실제 +${e.at - t0}ms)</span>`
+    b.innerHTML = (e.kind === 'seen' || e.kind === 'applied')
+      ? `${kindTag('ctrl')} <b>${replay.k}.</b> ${ZK_ICON[e.kind]} ${esc(e.text)} <span class="muted">(실제 +${e.at - t0}ms)</span>`
       : e.kind.startsWith('route')
       ? `${kindTag('ctrl')} <b>${replay.k}.</b> 🗺 ${esc(e.text)}${e.data ? ` <code>${esc(e.data)}</code>` : ''} <span class="muted">(실제 +${e.at - t0}ms)</span>`
       : `${kindTag('ctrl')} <b>${replay.k}.</b> ${ZK_ICON[e.kind] || '•'} 🗂 ${esc(e.text)} <span class="muted">(zxid ${e.zxid}, 실제 +${e.at - t0}ms)</span>`;
@@ -299,9 +312,10 @@ function banner(e, text, kind, t0) {
 function moveDot(base, d, color, dash, opts = {}) {
   const ov = document.getElementById('overlay');
   ov.innerHTML = base + `<path id="rp" d="${d}" fill="none" stroke="${color}" stroke-width="6" stroke-opacity=".3" stroke-dasharray="${dash}"/>
-    <circle id="dot" r="8" fill="${color}" stroke="#fff" stroke-width="2"/>`;
-  const path = ov.querySelector('#rp'), dot = ov.querySelector('#dot');
-  const len = path.getTotalLength(), t0 = performance.now(), dur = replay.stepMs * 0.8;
+    <circle id="dot" r="8" fill="${color}" stroke="#fff" stroke-width="2"/>${opts.label ? `<g id="dtag">${tag(0, 0, opts.label, color)}</g>` : ''}`;
+  const path = ov.querySelector('#rp'), dot = ov.querySelector('#dot'), dtag = ov.querySelector('#dtag');
+  let swapped = false;
+  const len = path.getTotalLength(), t0 = performance.now(), dur = replay.stepMs * 0.6;
   const ease = u => u < .5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
   const tick = now => {
     const t = Math.min(1, (now - t0) / dur);
@@ -310,6 +324,10 @@ function moveDot(base, d, color, dash, opts = {}) {
     else u = opts.back ? 1 - ease(t) : ease(t);
     const pt = path.getPointAtLength(len * u);
     dot.setAttribute('cx', pt.x); dot.setAttribute('cy', pt.y);
+    if (dtag) {
+      if (opts.pingpong && t >= .5 && opts.backLabel && !swapped) { dtag.innerHTML = tag(0, 0, opts.backLabel, opts.backColor || color); swapped = true; }
+      dtag.setAttribute('transform', `translate(${pt.x},${pt.y - 20})`);
+    }
     if (t < 1) requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
@@ -317,7 +335,7 @@ function moveDot(base, d, color, dash, opts = {}) {
 function pulse(base, x, y, color) {
   const ov = document.getElementById('overlay');
   ov.innerHTML = base + `<circle id="ring" cx="${x}" cy="${y}" r="6" fill="none" stroke="${color}" stroke-width="3"/><circle cx="${x}" cy="${y}" r="7" fill="${color}" stroke="#fff" stroke-width="2"/>`;
-  const ring = ov.querySelector('#ring'), t0 = performance.now(), dur = replay.stepMs * 0.8;
+  const ring = ov.querySelector('#ring'), t0 = performance.now(), dur = replay.stepMs * 0.6;
   const tick = now => { const t = ((now - t0) % 700) / 700; ring.setAttribute('r', 7 + 18 * t); ring.setAttribute('opacity', 1 - t); if (now - t0 < dur) requestAnimationFrame(tick); };
   requestAnimationFrame(tick);
 }
@@ -329,7 +347,10 @@ function playStep(e, t0) {
   const color = `var(--${kind})`;
   if (Array.isArray(seg)) return pulse('', seg[0], seg[1], color);
   if (!seg) { document.getElementById('overlay').innerHTML = ''; return; }
-  moveDot('', seg, color, kind === 'ctrl' ? '6 5' : '', {back: e.step === 'acked'});
+  // 가져감 = 풀: 소비자가 GET /fetch 를 보내고(청록) 리더가 메시지를 돌려준다(금색)
+  if (e.step === 'fetched') return moveDot('', seg, 'var(--ctrl)', '6 5', {pingpong: true, backColor: 'var(--data)', label: 'GET /fetch', backLabel: '메시지'});
+  const STEP_TAG = {dispatched: 'POST /produce', replicated: '팔로워 fetch', acked: 'ACK', committed: 'POST /offsets'};
+  moveDot('', seg, color, kind === 'ctrl' ? '6 5' : '', {back: e.step === 'acked', label: STEP_TAG[e.step]});
 }
 
 // ---------------- 선거 (조정 서비스의 기록으로): 세션 만료 → /controller 삭제 → 감시 알림 → 먼저 만드는 브로커가 컨트롤러
@@ -353,7 +374,8 @@ function lastElection(s) {
   }).map(e => ({...e, node: who2id(e.who) ?? 0}));
   // 새 컨트롤러가 /metadata 를 고친 직후의 감시 알림 (새 지도가 브로커들에게 퍼짐)
   steps.filter(e => e.kind === 'set').forEach(st => {
-    const n = ev.find(e => e.kind === 'notify' && e.seq > st.seq && e.seq <= st.seq + 3);
+    // 기다리던 브로커가 없으면 알림 기록이 없다 → 순번만 보면 한참 뒤의 다른 알림을 집으므로 1초 안의 것만
+    const n = ev.find(e => e.kind === 'notify' && e.seq > st.seq && e.seq <= st.seq + 3 && e.at - st.at < 1000);
     if (n && !steps.some(x => x.seq === n.seq)) steps.push({...n, node: 0});
   });
   // /controller 를 만들려 하지 않은 브로커: 읽어 보니 이미 주인이 있어 감시만 했다 (조정 서비스는 읽기를 기록하지 않아 브로커 쪽 기록으로)
@@ -364,6 +386,19 @@ function lastElection(s) {
     if (seen) steps.push({kind: 'seen', at: seen.at, node: n.id, who: 'broker-' + n.id,
       text: `broker-${n.id} 가 /controller 를 읽어 보니 이미 broker-${who2id(E.who)} → 만들지 않고 감시만 한다`});
   });
+  // 새 지도가 브로커마다 퍼진다: 각 브로커가 /metadata 를 다시 읽어 메모리 사본을 갱신 → 생산자·소비자는 아무 브로커에서나 이 사본을 받는다
+  const firstSet = steps.filter(e => e.kind === 'set').sort((a, b) => a.at - b.at)[0];
+  const setVer = firstSet ? Number((/버전 (\d+)/.exec(firstSet.text) || [0, 0])[1]) : 0;
+  if (firstSet) s.nodes.filter(n => n.reachable).forEach(n => {
+    // 새 컨트롤러가 쓴 버전 이상만 (그 전에 남아 있던 옛 지도를 읽은 기록은 뺀다)
+    const ap = ((n.coord || {}).events || []).filter(x => x.kind === 'metadata_applied' && x.at >= firstSet.at - 50 && x.at <= firstSet.at + 3000
+      && Number((/지도 v(\d+)/.exec(x.text) || [0, 0])[1]) >= setVer).sort((a, b) => a.at - b.at)[0];
+    const v = ap && /지도 v(\d+)/.exec(ap.text);
+    if (ap) steps.push({kind: 'applied', at: ap.at, node: n.id, who: 'broker-' + n.id, version: v ? Number(v[1]) : null,
+      text: n.id === who2id(E.who)
+        ? `broker-${n.id}(컨트롤러) 는 자기가 쓴 지도${v ? ' v' + v[1] : ''} 를 자기 사본에도 반영 → broker-${n.id} 에 물어도 새 지도를 준다`
+        : `broker-${n.id} 가 /metadata 를 읽어 지도${v ? ' v' + v[1] : ''} 사본을 갱신 → 이제 생산자·소비자가 broker-${n.id} 에 물어도 새 지도를 준다`});
+  });
   steps.sort((a, b) => a.at - b.at);
   // 그 다음: 생산자가 지도를 받아 가는가 (새 컨트롤러가 /metadata 를 고친 뒤 첫 GET /metadata)
   const setAt = (steps.find(e => e.kind === 'set') || E).at;
@@ -371,12 +406,19 @@ function lastElection(s) {
   (s.producers || []).forEach(pr => {
     // 초기화(또는 재시작) 전의 요청은 지금 생산자의 것이 아니므로 뺀다
     const f = fetches.filter(x => x.client === pr.name && x.at >= setAt && x.at >= (pr.since || 0)).sort((a, b) => a.at - b.at)[0];
+    // 그 시점에 생산자가 들고 있던 지도: 이 생산자(초기화 이후)의 마지막 요청 중 f 보다 앞선 것. 없으면 지도 없음
+    const mine = fetches.filter(x => x.client === pr.name && x.at >= (pr.since || 0) && (!f || x.at < f.at)).sort((a, b) => a.at - b.at);
+    const snap = x => x ? {version: x.version, summary: x.summary} : null;
+    // 선출 뒤 다시 받지 않았으면(f 없음) 지금 들고 있는 지도가 곧 그 시점의 지도다 (브로커가 재시작돼 요청 기록이 없을 때도)
+    const held = pr.metadataVersion == null ? null
+      : {version: pr.metadataVersion, summary: `${pr.topic} ` + Object.entries(pr.leaders || {}).map(([p, l]) => `p${p}→b${l}`).join(' ')};
+    const prev = snap(mine.at(-1)) || (f ? null : held);
     const last = steps.length ? steps.at(-1).at : E.at;
     const gap = f ? ((f.at - E.at) / 1000).toFixed(1) : 0;
     steps.push(f
-      ? {kind: 'route', at: f.at, node: 0, who: pr.name, broker: f.broker,
+      ? {kind: 'route', at: f.at, node: 0, who: pr.name, broker: f.broker, prev, got: snap(f),
          text: `(선출 ${gap}초 뒤, 처음 보낼 때) ${pr.name} → broker-${f.broker}: GET /metadata`, data: `↩ v${f.version} · 컨트롤러 b${f.controllerId} · ${f.summary}`}
-      : {kind: 'route_none', at: last, node: 0, who: pr.name,
+      : {kind: 'route_none', at: last, node: 0, who: pr.name, prev,
          text: pr.metadataVersion == null
            ? `${pr.name} 는 아직 지도가 없다. 처음 보낼 때 아무 브로커에게 GET /metadata 로 받는다`
            : `${pr.name} 는 지도를 다시 받지 않았다 (들고 있는 지도 v${pr.metadataVersion}). 리더가 그대로면 옛 지도로 계속 보낸다. 409·연결 실패를 받을 때 다시 받는다`});
@@ -384,7 +426,7 @@ function lastElection(s) {
   steps.sort((a, b) => a.at - b.at);
   return {E: {...E, node: who2id(E.who), term: E.zxid}, steps};
 }
-const ZK_ICON = {session_expired: '💀', deleted: '🗑', notify: '🔔', create_conflict: '✋', created: '👑', set: '📜', route: '🗺', route_none: '🗺', seen: '👀'};
+const ZK_ICON = {session_expired: '💀', deleted: '🗑', notify: '🔔', create_conflict: '✋', created: '👑', set: '📜', route: '🗺', route_none: '🗺', seen: '👀', applied: '🗺'};
 /** 단계 k 까지 적용한 상태: /controller 주인, 브로커별 세션. */
 function electionState(list, k, ids) {
   const st = {holder: null, brokers: {}};
@@ -396,6 +438,7 @@ function electionState(list, k, ids) {
     if (e.kind === 'created') st.holder = b;
     if (e.kind === 'create_conflict' && st.brokers[b]) st.brokers[b].lost = true;
     if (e.kind === 'seen' && st.brokers[b]) st.brokers[b].seen = true;
+    if (e.kind === 'applied' && st.brokers[b]) st.brokers[b].map = e.version;
   });
   return st;
 }
@@ -404,7 +447,7 @@ function electionBase(e) {
   const ids = Object.keys(GEO.BOX).map(Number);
   const st = electionState(replay.steps, replay.k, ids);
   const Z = GEO.ZK;
-  let out = `<rect x="${Z.x + 2}" y="${Z.y + 30}" width="${Z.w - 4}" height="22" fill="var(--card)"/>
+  let out = routeBase() + `<rect x="${Z.x + 2}" y="${Z.y + 30}" width="${Z.w - 4}" height="22" fill="var(--card)"/>
     <text x="${Z.x + 14}" y="${Z.y + 44}" font-size="12"><tspan font-weight="700">/controller</tspan> → ${st.holder ? `<tspan font-weight="700" fill="var(--accent)">broker-${st.holder}</tspan>` : '<tspan fill="var(--warn)" font-weight="700">비어 있음</tspan>'} <tspan fill="var(--muted)">⏪ 그 시점</tspan></text>
     <rect x="${Z.x}" y="${Z.y}" width="${Z.w}" height="${Z.h}" rx="12" fill="none" stroke="${e && !e.node ? 'var(--ctrl)' : 'none'}" stroke-width="3.5"/>`;
   ids.forEach(b => {
@@ -412,11 +455,35 @@ function electionBase(e) {
     const label = st.holder === b ? '👑 컨트롤러' : !n.session ? '💀 세션 만료' : n.lost ? '브로커 (자리 경쟁에서 짐)' : n.seen ? '브로커 (이미 있어 감시만)' : '브로커';
     const color = st.holder === b ? 'var(--accent)' : !n.session ? 'var(--bad)' : 'var(--muted)';
     const active = e && e.node === b;
-    out += `<rect x="${x0 + 2}" y="${y + 2}" width="${GEO.PW - 4}" height="44" rx="10" fill="var(--card)"/>
+    out += `<rect x="${x0 + 2}" y="${y + 2}" width="${GEO.PW - 4}" height="30" rx="10" fill="var(--card)"/>
       <rect x="${x0}" y="${y}" width="${GEO.PW}" height="${GEO.BOX[b].h}" rx="12" fill="none" stroke="${active ? 'var(--ctrl)' : 'none'}" stroke-width="3.5"/>
       <text x="${x0 + 14}" y="${y + 21}" font-weight="700" font-size="14">broker-${b}</text>
       <text x="${x0 + 92}" y="${y + 21}" font-size="12.5" font-weight="700" fill="${color}">${esc(label)}</text>
-      <text x="${x0 + 14}" y="${y + 39}" font-size="11" fill="var(--muted)">⏪ 재생 중: 그 시점의 상태</text>`;
+      ${(() => { // 지도 버전: 받은 뒤엔 빨강, 방금 받은 단계면 빨간 바탕으로 눈에 띄게
+        if (!n.map) return `<text x="${x0 + GEO.PW - 12}" y="${y + 21}" text-anchor="end" font-size="11.5" fill="var(--muted)">⏪ 그 시점</text>`;
+        const now = e && e.kind === 'applied' && e.node === b, txt = now ? `🗺 지도 v${n.map} 갱신!` : `🗺 지도 v${n.map}`, w = tagW(txt) + 4;
+        return now
+          ? `<rect x="${x0 + GEO.PW - 10 - w}" y="${y + 8}" width="${w}" height="19" rx="9.5" fill="var(--bad)"/>
+             <text x="${x0 + GEO.PW - 10 - w / 2}" y="${y + 21.5}" text-anchor="middle" font-size="11.5" font-weight="700" fill="#fff">${txt}</text>`
+          : `<text x="${x0 + GEO.PW - 12}" y="${y + 21}" text-anchor="end" font-size="11.5" font-weight="700" fill="var(--bad)">${txt}</text>`;
+      })()}
+`;
+  });
+  return out;
+}
+/** 재생 중 생산자 라우팅 칸: 그 시점에 들고 있던 지도 (받는 단계를 지나면 받은 지도). */
+function routeBase() {
+  if (!GEO || !GEO.ROUTE) return '';
+  let out = '';
+  replay.steps.forEach((st, i) => {
+    if (!st.kind || !st.kind.startsWith('route') || !GEO.ROUTE[st.who]) return;
+    const done = replay.k > i, m = st.kind === 'route' && done ? st.got : st.prev;
+    const [sx, sy] = GEO.ROUTE[st.who], x = sx - 240, w = 270;
+    const parts = m && m.summary ? m.summary.slice(m.summary.indexOf(' ') + 1) : '';
+    out += `<rect x="${x + 1}" y="${sy + 1}" width="${w - 2}" height="46" rx="8" fill="var(--bg)" stroke="${done && st.kind === 'route' ? 'var(--bad)' : 'var(--line)'}" stroke-width="${done && st.kind === 'route' ? 2 : 1}"/>
+      <text x="${x + 10}" y="${sy + 17}" font-size="12" font-weight="700">🧭 라우팅 <tspan font-weight="400" font-size="10.5" fill="var(--muted)">⏪ 그 시점</tspan></text>
+      <text x="${x + w - 10}" y="${sy + 17}" text-anchor="end" font-size="10.5" font-weight="700" fill="${m ? 'var(--bad)' : 'var(--muted)'}">${m ? `지도 v${m.version}` : '지도 없음'}</text>
+      <text x="${x + 10}" y="${sy + 36}" font-size="11" fill="var(--muted)">${m ? esc(parts) : '처음 보낼 때 받는다'}</text>`;
   });
   return out;
 }
@@ -432,12 +499,14 @@ function playElection(e, t0) {
   if (!GEO) return;
   const b = e.node, has = b && GEO.BOX[b];
   if ((e.kind === 'created' || e.kind === 'create_conflict') && has) // 브로커 → 조정 서비스: /controller 만들기 → 성공/실패
-    return moveDot(base, zkPath(b), 'var(--ctrl)', '6 5', {pingpong: true, backColor: e.kind === 'created' ? 'var(--ok)' : 'var(--bad)'});
-  if (e.kind === 'set' && has) return moveDot(base, zkPath(b), 'var(--ctrl)', '6 5'); // 새 컨트롤러가 /metadata 에 "컨트롤러 = 나"
-  if (e.kind === 'seen' && has) return moveDot(base, zkPath(b), 'var(--ctrl)', '6 5', {pingpong: true}); // 읽기 → 이미 있음
+    return moveDot(base, zkPath(b), 'var(--ctrl)', '6 5', {pingpong: true, backColor: e.kind === 'created' ? 'var(--ok)' : 'var(--bad)',
+      label: 'create /controller', backLabel: e.kind === 'created' ? 'OK → 👑' : '이미 있음'});
+  if (e.kind === 'set' && has) return moveDot(base, zkPath(b), 'var(--ctrl)', '6 5', {label: 'set /metadata'}); // 새 컨트롤러가 /metadata 에 "컨트롤러 = 나"
+  if (e.kind === 'applied' && has) return moveDot(base, zkPath(b), 'var(--ctrl)', '6 5', {back: true, label: `get /metadata → v${e.version ?? '?'}`}); // 조정 서비스 → 브로커: 새 지도
+  if (e.kind === 'seen' && has) return moveDot(base, zkPath(b), 'var(--ctrl)', '6 5', {pingpong: true, label: 'get /controller', backLabel: `이미 broker-${replay.election.E.node}`}); // 읽기 → 이미 있음
   if (e.kind === 'notify') { // 조정 서비스 → 기다리던 브로커들
     const ids = Object.keys(GEO.BOX).map(Number), st = electionState(replay.steps, replay.k, ids);
-    return moveDots(base, ids.filter(x => st.brokers[x].session).map(x => zkPath(x)), 'var(--ctrl)', true);
+    return moveDots(base, ids.filter(x => st.brokers[x].session).map(x => zkPath(x)), 'var(--ctrl)', true, '🔔 watch 알림');
   }
   if (e.kind === 'session_expired' && has) { const [x, y] = brokerPt(b); return pulse(base, x - 20, y, 'var(--bad)'); }
   const rp = GEO.ROUTE && GEO.ROUTE[e.who];
@@ -448,23 +517,26 @@ function playElection(e, t0) {
     const line2 = parts.slice(0, 2).join(' · ') + ' · ' + (sp > 0 ? sum.slice(0, sp) : sum), line3 = sp > 0 ? sum.slice(sp + 1) : '';
     const lx = sx - 240, ly = sy + 64; // 실시간 상자: x0 + 10 = sx - 240
     const label = `<rect x="${lx}" y="${ly}" width="270" height="60" rx="8" fill="var(--card)" stroke="var(--ctrl)" stroke-width="2"/>
-      <text x="${lx + 10}" y="${ly + 17}" font-size="11.5" font-weight="700" fill="var(--ctrl)">🗺 GET /metadata → broker-${e.broker} <tspan font-weight="400" fill="var(--muted)">⏪ 재생</tspan></text>
+      <text x="${lx + 10}" y="${ly + 17}" font-size="11.5" font-weight="700" fill="var(--ctrl)">🗺 broker-${e.broker} 에 물어 받은 지도 <tspan font-weight="400" fill="var(--muted)">⏪ 재생</tspan></text>
       <text x="${lx + 10}" y="${ly + 34}" font-size="11" font-family="ui-monospace,monospace">${esc(line2)}</text>
       <text x="${lx + 24}" y="${ly + 51}" font-size="11" font-family="ui-monospace,monospace">${esc(line3)}</text>`;
-    return moveDot(base + label, `M${sx},${sy} C${sx},${sy - 60} ${bx - 70},${by} ${bx},${by}`, 'var(--ctrl)', '6 5', {pingpong: true, backColor: 'var(--ok)'});
+    return moveDot(base + label, `M${sx},${sy} C${sx},${sy - 60} ${bx - 70},${by} ${bx},${by}`, 'var(--ctrl)', '6 5', {pingpong: true, backColor: 'var(--ok)', label: 'GET /metadata', backLabel: '지도'});
   }
   if (e.kind === 'route_none' && rp) return pulse(base, rp[0], rp[1], 'var(--warn)');
   const [x, y] = zkPt();
   pulse(base, x - 30, y, e.kind === 'deleted' ? 'var(--warn)' : 'var(--ctrl)');
 }
-function moveDots(base, paths, color, back) {
+function moveDots(base, paths, color, back, label) {
   const ov = document.getElementById('overlay');
-  ov.innerHTML = base + paths.map((d, i) => `<path id="rp${i}" d="${d}" fill="none" stroke="${color}" stroke-width="6" stroke-opacity=".3" stroke-dasharray="6 5"/><circle id="dot${i}" r="8" fill="${color}" stroke="#fff" stroke-width="2"/>`).join('');
+  ov.innerHTML = base + paths.map((d, i) => `<path id="rp${i}" d="${d}" fill="none" stroke="${color}" stroke-width="6" stroke-opacity=".3" stroke-dasharray="6 5"/><circle id="dot${i}" r="8" fill="${color}" stroke="#fff" stroke-width="2"/>`).join('')
+    + (label ? `<g id="dtag0">${tag(0, 0, label, color)}</g>` : '');
+  const dtag0 = ov.querySelector('#dtag0');
   const items = paths.map((d, i) => ({p: ov.querySelector('#rp' + i), dot: ov.querySelector('#dot' + i)})).map(x => ({...x, len: x.p.getTotalLength()}));
-  const t0 = performance.now(), dur = replay.stepMs * 0.8;
+  const t0 = performance.now(), dur = replay.stepMs * 0.6;
   const tick = now => {
     const t = Math.min(1, (now - t0) / dur), u = back ? 1 - t : t, ease = u < .5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
-    items.forEach(x => { const pt = x.p.getPointAtLength(x.len * ease); x.dot.setAttribute('cx', pt.x); x.dot.setAttribute('cy', pt.y); });
+    items.forEach((x, i) => { const pt = x.p.getPointAtLength(x.len * ease); x.dot.setAttribute('cx', pt.x); x.dot.setAttribute('cy', pt.y);
+      if (i === 0 && dtag0) dtag0.setAttribute('transform', `translate(${pt.x},${pt.y - 20})`); });
     if (t < 1) requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
@@ -483,7 +555,7 @@ function draw(s) {
   const ctrl = meta.controllerId;
   const coordOf = {}; // 그룹 → 코디네이터 브로커
   up.forEach(n => (n.groups || []).forEach(g => { coordOf[g.group] = n.id; }));
-  let back = '', mid = '', front = '', tracePath = '';
+  let back = '', mid = '', front = '', tracePath = '', tags = ''; // tags = 선 위 이름표 (맨 위에 그린다)
   SEG = {};
 
   // ---- 가운데. ① 기본 흐름: 토픽의 파티션만 / ② 브로커·복제: 브로커 상자 안에 리더·팔로워 사본, 조정 서비스
@@ -516,7 +588,7 @@ function draw(s) {
     mid += `<g opacity="${n.reachable && !(r && r.isolated) ? 1 : 0.45}">
       <rect x="${PX - PW / 2}" y="${y}" width="${PW}" height="${h}" rx="12" fill="var(--card)" stroke="${C(b)}" stroke-width="${b === ctrl ? 3 : 1.6}"/>
       <text x="${PX - PW / 2 + 14}" y="${y + 21}" font-weight="700" font-size="14">broker-${b}${b === ctrl ? ' 👑 컨트롤러' : ''}</text>
-      <text x="${PX + PW / 2 - 12}" y="${y + 21}" text-anchor="end" font-size="11.5" fill="var(--muted)">${flags.map(([t, c]) => `<tspan fill="${c}" font-weight="700">${esc(t)} </tspan>`).join('')}${coords.length ? `<title>그룹 코디네이터</title>🤝 ${coords.map(esc).join(', ')}` : ''}</text>`;
+      <text x="${PX + PW / 2 - 12}" y="${y + 21}" text-anchor="end" font-size="11.5" fill="var(--muted)">${flags.map(([t, c]) => `<tspan fill="${c}" font-weight="700">${esc(t)} </tspan>`).join('')}${coords.length ? `<title>소비자 그룹 코디네이터: 합류·재조정·박동·오프셋 커밋을 받는다</title>🤝 코디네이터: ${coords.map(esc).join(', ')}` : ''}</text>`;
     let ry = y + HEADH;
     sections.forEach(({t, parts}) => {
       if (TOPH) mid += `<text x="${PX - PW / 2 + 14}" y="${ry + 14}" font-size="11" font-weight="700" fill="var(--muted)">${esc(t.name)}</text>`;
@@ -587,9 +659,20 @@ function draw(s) {
   Object.keys(BOX).map(Number).forEach(b => {
     const se = sessions['broker-' + b], ok = se && se.lastPingAgoMs < 1500;
     // 세션 선: 세션이 없을 때(빨강) 또는 그 브로커의 세션·임시 노드 이벤트가 방금 있었을 때만
-    if (se && !zkRecent.some(e => e.who === 'broker-' + b)) return;
+    const sessionEv = e => e.who === 'broker-' + b && (e.kind.startsWith('session') || e.path === '/brokers/' + b);
+    const offsetsEv = zkRecent.filter(e => e.who === 'broker-' + b && e.path.startsWith('/offsets/') && (e.kind === 'set' || e.kind === 'created'));
+    if (offsetsEv.length) { // 코디네이터가 커밋된 오프셋을 조정 서비스 /offsets 에 쓴다
+      const ox = ZK.x + ZK.w, oy = ZK.y + 104, bx = PX + PW / 2, by = head(b) + 8, ob = 25 + Math.abs(by - oy) / 14;
+      const od = `M${bx},${by} C${bx + ob},${by} ${ox + ob},${oy} ${ox},${oy}`;
+      tags += edgeTag(od, 'set /offsets', 'var(--ctrl)', 0.5);
+      back += `<path d="${od}" fill="none" stroke="var(--ctrl)" stroke-width="1.6" stroke-dasharray="3 5" opacity=".85"><title>코디네이터 broker-${b} 가 커밋된 오프셋을 조정 서비스 /offsets 에 씀</title></path>`;
+    }
+    // 세션 선: 세션이 없을 때(빨강) 또는 그 브로커의 세션 시작·만료, /brokers/{id} 등록·삭제가 방금 있었을 때만
+    if (se && !zkRecent.some(sessionEv)) return;
     const x1 = ZK.x + ZK.w, y1 = ZK.y + ZK.h / 2, x2 = PX + PW / 2, y2 = head(b), bulge = 40 + Math.abs(y2 - y1) / 12;
-    back += `<path d="M${x1},${y1} C${x1 + bulge},${y1} ${x2 + bulge},${y2} ${x2},${y2}" fill="none" stroke="${se ? 'var(--ctrl)' : 'var(--bad)'}" stroke-width="1.5"
+    const sd = `M${x1},${y1} C${x1 + bulge},${y1} ${x2 + bulge},${y2} ${x2},${y2}`;
+    tags += edgeTag(sd, se ? '세션 시작 · /brokers 등록' : '세션 끊김', se ? 'var(--ctrl)' : 'var(--bad)', 0.6);
+    back += `<path d="${sd}" fill="none" stroke="${se ? 'var(--ctrl)' : 'var(--bad)'}" stroke-width="1.5"
       stroke-dasharray="3 5" opacity="${se ? 0.7 : 0.5}" ${ok ? anim(2) : ''}><title>broker-${b} ↔ ZooKeeper-lite 세션 ${se ? `${se.id} (박동 ${(se.lastPingAgoMs / 1000).toFixed(1)}초 전)` : '없음'}</title></path>`;
   });
 
@@ -600,7 +683,9 @@ function draw(s) {
     Object.keys(BOX).map(Number).forEach(b => {
       const x1 = ZK.x + ZK.w, y1 = ZK.y + 84, x2 = PX + PW / 2, y2 = head(b), bulge = 60 + Math.abs(y2 - y1) / 10;
       const writer = b === w;
-      back += `<path d="M${x2},${y2} C${x2 + bulge},${y2} ${x1 + bulge},${y1} ${x1},${y1}" fill="none" stroke="var(--ctrl)" stroke-width="${writer ? 2.6 : 1.6}"
+      const md = `M${x2},${y2} C${x2 + bulge},${y2} ${x1 + bulge},${y1} ${x1},${y1}`;
+      tags += edgeTag(md, writer ? 'set /metadata' : '🔔 watch → get', 'var(--ctrl)', writer ? 0.5 : 0.25);
+      back += `<path d="${md}" fill="none" stroke="var(--ctrl)" stroke-width="${writer ? 2.6 : 1.6}"
         stroke-dasharray="${writer ? '' : '3 5'}" opacity=".9"><title>${writer ? `📜 컨트롤러 broker-${b} 가 /metadata 를 고침` : `🔔 /metadata 감시 알림 → broker-${b} 가 새 지도를 받아 둠`}</title></path>`;
     });
     mid += `<text x="${ZK.x + 4}" y="${ZK.y + ZK.h + 17}" font-size="11" font-weight="700" fill="var(--ctrl)">📜 ${esc(metaSet.who)} 가 /metadata 고침 → 🔔 브로커들에 알림</text>`;
@@ -622,6 +707,7 @@ function draw(s) {
       const traced = tr && tr.key === key && tr.has('replicated', 'broker-' + f);
       const trouble = !p.isr.includes(f) || (lag !== null && lag > 20);
       if (!traced && !trouble) return; // 평소엔 숨긴다 (추적 중인 파티션, 뒤처진 사본만)
+      tags += edgeTag(d, '팔로워 fetch', traced ? 'var(--data)' : col);
       back += `<path d="${d}" fill="none" stroke="${traced ? 'var(--data)' : col}" stroke-width="${traced ? 3 : 1.5}" stroke-dasharray="4 4" opacity="${traced ? 1 : 0.7}">
         <title>${key}: broker-${p.leader} → broker-${f} 복제 (팔로워가 가져감) ${st ? `· ${lag}건 뒤, ${(st.lastFetchAgoMs / 1000).toFixed(1)}초 전` : '· 아직 안 옴'}</title></path>`;
     });
@@ -668,6 +754,7 @@ function draw(s) {
       <text x="${x0 + 20}" y="${routY + 36}" font-size="11" fill="var(--muted)">${pr.metadataVersion == null ? '처음 보낼 때 받는다' : Object.entries(leaders).map(([p, l]) => `p${p}→b${l}`).join('  ')}</text></g>`;
     // 라우팅 → 각 파티션 리더 (데이터)
     const routeX = x0 + QW - 10, routeY = routY + routH / 2;
+    let produceTagged = false;
     if (tm) tm.partitions.forEach(p => {
       const key = `${pr.topic}-${p.partition}`, lead = leaders[p.partition]; // 생산자가 들고 있는 지도의 리더 (없거나 낡았을 수 있다)
       if (lead == null || !ROW[`${key}|${lead}`]) return;
@@ -675,6 +762,7 @@ function draw(s) {
       const d = curve(routeX, routeY, ...rowL(key, lead));
       if (tr && tr.key === key) SEG.dispatched = d;
       const traced = tr && tr.key === key && tr.has('dispatched');
+      if ((traced || rate) && !produceTagged) { tags += edgeTag(d, 'POST /produce', 'var(--data)', 0.45); produceTagged = true; }
       back += `<path d="${d}" fill="none" stroke="${traced ? 'var(--data)' : partColor(pr.topic, p.partition)}" stroke-width="${traced ? 3.2 : width(rate)}"
         stroke-dasharray="8 6" opacity="${traced ? 1 : rate ? 0.85 : 0.3}" ${anim(rate)}><title>${pr.name} → ${key} 의 리더 broker-${lead} (생산자의 지도 기준)</title></path>`;
     });
@@ -683,13 +771,17 @@ function draw(s) {
     GEO.ROUTE[pr.name] = [x0 + QW - 40, routY];
     if (mineTopic) SEG.map = [x0 + QW - 70, routY + 14]; // 한 건 추적의 🗺 단계 = 캐시한 지도를 본다 (요청 없음)
     const asked = traffic.filter(t => t.kind === 'metadata' && t.client === pr.name && t.agoMs < RECENT).sort((a, b) => a.agoMs - b.agoMs)[0];
-    if (asked && BOX[asked.broker]) {
+    // 선출 재생 중엔 그 시점의 라우팅을 따로 그리므로 지금의 지도 요청은 숨긴다 (헷갈리지 않게)
+    if (asked && BOX[asked.broker] && !(replay.on && replay.mode === 'election')) {
       const sx = x0 + QW - 40, sy = routY, bx = PX - PW / 2, by = head(asked.broker);
-      back += `<path d="M${sx},${sy} C${sx},${sy - 60} ${bx - 70},${by} ${bx},${by}" fill="none" stroke="var(--ctrl)" stroke-width="2.4" stroke-dasharray="3 5">
+      // 요청은 생산자 → 브로커지만 실제로 흐르는 건 응답(지도): 선은 브로커 → 생산자 방향으로 흘러가게 그린다
+      const gd = `M${bx},${by} C${bx - 70},${by} ${sx},${sy - 60} ${sx},${sy}`;
+      tags += edgeTag(gd, 'GET /metadata ⇄ 지도', 'var(--ctrl)', 0.45);
+      back += `<path d="${gd}" fill="none" stroke="var(--ctrl)" stroke-width="2.4" stroke-dasharray="3 5" ${anim(3)}>
         <title>${pr.name} → broker-${asked.broker}: GET /metadata (${(asked.agoMs / 1000).toFixed(1)}초 전)</title></path>`;
       const ly = qy + h + 6, lead = Object.entries(leaders).map(([p, l]) => `p${p}→b${l}`).join(' ');
       front += `<rect x="${x0 + 10}" y="${ly}" width="${QW - 20}" height="60" rx="8" fill="var(--card)" stroke="var(--ctrl)" stroke-width="1.6"/>
-        <text x="${x0 + 20}" y="${ly + 17}" font-size="11.5" font-weight="700" fill="var(--ctrl)">🗺 GET /metadata → broker-${asked.broker} <tspan font-weight="400" fill="var(--muted)">${(asked.agoMs / 1000).toFixed(1)}초 전</tspan></text>
+        <text x="${x0 + 20}" y="${ly + 17}" font-size="11.5" font-weight="700" fill="var(--ctrl)">🗺 broker-${asked.broker} 에 물어 받은 지도 <tspan font-weight="400" fill="var(--muted)">${(asked.agoMs / 1000).toFixed(1)}초 전</tspan></text>
         <text x="${x0 + 20}" y="${ly + 34}" font-size="11" font-family="ui-monospace,monospace">↩ ${esc(asked.detail || '')} · 컨트롤러 b${pr.controllerId ?? '?'} · ${esc(pr.topic)}</text>
         <text x="${x0 + 34}" y="${ly + 51}" font-size="11" font-family="ui-monospace,monospace">${lead}</text>`;
       h += 66;
@@ -720,6 +812,7 @@ function draw(s) {
       const committing = traffic.some(t => t.kind === 'commit' && t.detail === g.group && t.agoMs < RECENT);
       if (BOX[g.coordinator] && (g.state !== 'STABLE' || committing)) {
         const d = `M${x0},${gy + 12} C${x0 - 40},${gy + 12} ${PX + PW / 2 + 60},${head(g.coordinator)} ${PX + PW / 2},${head(g.coordinator)}`;
+        tags += edgeTag(d, committing ? 'POST /offsets (커밋)' : 'join · sync (재조정)', 'var(--ctrl)', 0.3);
         back += `<path d="${d}" fill="none" stroke="var(--ctrl)" stroke-width="1.8" stroke-dasharray="2 5" opacity=".85"><title>${committing ? '📌 오프셋 커밋' : '⏳ 재조정'}: 그룹 ${g.group} 의 코디네이터 = broker-${g.coordinator} (박동·합류·오프셋 커밋)</title></path>`;
       }
       g.members.forEach((m, i) => {
@@ -731,8 +824,9 @@ function draw(s) {
           if (!pm || !ROW[`${key}|${pm.leader}`]) return;
           const r = fetchRate[`${m.clientId}|${key}`] || 0;
           const d = curve(PX + PW / 2, ROW[`${key}|${pm.leader}`], mx - NW / 2, my);
-          if (tr && tr.key === key) SEG[`fetched|${m.clientId}`] = d;
+          if (tr && tr.key === key) SEG[`fetched|${m.clientId}`] = curve(mx - NW / 2, my, PX + PW / 2, ROW[`${key}|${pm.leader}`]); // 소비자 → 리더 (요청 방향)
           const traced = tr && tr.key === key && fetched;
+          if (traced || r) tags += edgeTag(d, 'GET /fetch ⇄ 메시지', traced ? 'var(--data)' : partColor(g.topic, p), 0.7);
           back += `<path d="${d}" fill="none" stroke="${traced ? 'var(--data)' : partColor(g.topic, p)}" stroke-width="${traced ? 3.2 : width(r)}" stroke-dasharray="8 6"
             opacity="${traced ? 1 : r ? 0.85 : 0.3}" ${anim(r)}><title>${key} 의 리더 broker-${pm.leader} → ${m.id}</title></path>`;
         });
@@ -743,6 +837,7 @@ function draw(s) {
           SEG[`committed|group ${g.group}`] = d;
           if (tr.has('committed', 'group ' + g.group)) tracePath += `<path d="${d}" fill="none" stroke="var(--ctrl)" stroke-width="2.4" stroke-dasharray="3 5"><title>오프셋 커밋: 코디네이터 broker-${g.coordinator} 를 거쳐 ZooKeeper-lite /offsets 에 기록</title></path>`;
         }
+        if (!idle) front += `<text x="${mx - NW / 2 - 4}" y="${my - 6}" text-anchor="end" font-size="10" font-weight="600" fill="var(--ctrl)"><title>풀 방식: 소비자가 리더에게 GET /fetch 로 요청하고, 리더는 메시지를 답으로 준다 (롱 폴링: 없으면 최대 1초 기다렸다 답함)</title>⇠ fetch</text>`;
         const tag = m.id.slice(m.id.lastIndexOf('#'));
         const sub = idle ? (g.state === 'STABLE' ? '놀고 있음' : '배정 대기') : `p${m.assigned.join(',')} · lag ${mlag}`;
         front += `<g opacity="${idle ? 0.5 : 1}">
@@ -775,7 +870,7 @@ function draw(s) {
   const el = document.getElementById('flow');
   el.setAttribute('viewBox', `0 0 1160 ${fullH}`);
   document.getElementById('overlay').setAttribute('viewBox', `0 0 1160 ${fullH}`);
-  el.innerHTML = back + mid + front + tracePath + heads;
+  el.innerHTML = back + mid + front + tracePath + tags + heads;
 }
 
 // ------------------------------------------------------------------ 표·타임라인
@@ -836,7 +931,7 @@ function tables(s) {
   }).join('');
   // 브로커 기록 + 조정 서비스 기록 (조정 서비스는 node 0, 회색)
   const zkEv = ((s.zk || {}).events || []).filter(e => e.kind !== 'notify').map(e => ({...e, node: 0, text: '🗂 ' + e.text}));
-  const events = up.flatMap(n => n.coord.events).concat(zkEv)
+  const events = up.flatMap(n => n.coord.events.filter(e => e.kind !== 'metadata_applied')).concat(zkEv)
     .sort((a, b) => b.at - a.at || (a.node === b.node ? b.seq - a.seq : a.node - b.node)).slice(0, 18);
   document.getElementById('events').innerHTML = events.map(e =>
     `<tr><td>${time(e.at)}</td><td><span class="dot" style="background:${C(e.node)}"></span> ${esc(e.text)}</td></tr>`).join('');
