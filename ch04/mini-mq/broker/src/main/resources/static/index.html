@@ -723,7 +723,8 @@ function draw(s) {
     })()}</text></g>`;
   // 컨트롤 선(청록)은 평소엔 그리지 않고, 일이 일어났을 때만 RECENT 동안 그린다
   const RECENT = 6000, now = Date.now();
-  const zkRecent = (zk.events || []).filter(e => now - e.at < RECENT);
+  const quiet = replay.on; // 재생 중엔 실시간 선(지금 오가는 트래픽·이벤트)을 그리지 않는다: 재생 단계의 선만 보이게
+  const zkRecent = quiet ? [] : (zk.events || []).filter(e => now - e.at < RECENT);
   const sessions = {};
   (zk.sessions || []).forEach(x => { sessions[x.name] = x; });
   Object.keys(BOX).map(Number).forEach(b => {
@@ -833,7 +834,7 @@ function draw(s) {
       const d = curve(routeX, routeY, ...rowL(key, lead));
       if (tr && tr.key === key) SEG.dispatched = d;
       const traced = tr && tr.key === key && tr.has('dispatched');
-      if (!traced && !rate) return; // 평소엔 안 그린다: 묶음을 보낼 때만
+      if (!traced && (!rate || quiet)) return; // 평소엔 안 그린다: 묶음을 보낼 때만
       if ((traced || rate) && !produceTagged) { tags += edgeTag(d, 'POST /produce', 'var(--data)', 0.45); produceTagged = true; }
       back += `<path d="${d}" fill="none" stroke="${traced ? 'var(--data)' : partColor(pr.topic, p.partition)}" stroke-width="${traced ? 3.2 : width(rate)}"
         stroke-dasharray="8 6" opacity="${traced ? 1 : rate ? 0.85 : 0.3}" ${anim(rate)}><title>${pr.name} → ${key} 의 리더 broker-${lead} (생산자의 지도 기준)</title></path>`;
@@ -882,7 +883,7 @@ function draw(s) {
         <text x="${x0 + GW - 10}" y="${gy + 17}" text-anchor="end" font-size="11" fill="${color}" font-weight="600"><title>세대(generation): 재조정이 끝날 때마다 1씩 오른다</title>세대 ${g.generation} · ${label}</text>`;
       // 그룹 → 코디네이터 브로커 (컨트롤)
       const committing = traffic.some(t => t.kind === 'commit' && t.detail === g.group && t.agoMs < RECENT);
-      if (BOX[g.coordinator] && (g.state !== 'STABLE' || committing)) {
+      if (BOX[g.coordinator] && !quiet && (g.state !== 'STABLE' || committing)) {
         const d = `M${x0},${gy + 12} C${x0 - 40},${gy + 12} ${PX + PW / 2 + 60},${head(g.coordinator)} ${PX + PW / 2},${head(g.coordinator)}`;
         tags += edgeTag(d, committing ? 'POST /offsets (커밋)' : 'join · sync (재조정)', 'var(--ctrl)', 0.3);
         back += `<path d="${d}" fill="none" stroke="var(--ctrl)" stroke-width="1.8" stroke-dasharray="2 5" opacity=".85"><title>${committing ? '📌 오프셋 커밋' : '⏳ 재조정'}: 그룹 ${g.group} 의 코디네이터 = broker-${g.coordinator} (박동·합류·오프셋 커밋)</title></path>`;
@@ -898,7 +899,7 @@ function draw(s) {
           const d = curve(PX + PW / 2, ROW[`${key}|${pm.leader}`], mx - NW / 2, my);
           if (tr && tr.key === key) SEG[`fetched|${m.clientId}`] = curve(mx - NW / 2, my, PX + PW / 2, ROW[`${key}|${pm.leader}`]); // 소비자 → 리더 (요청 방향)
           const traced = tr && tr.key === key && fetched;
-          if (!traced && !r) return; // 평소엔 안 그린다: 롱 폴링은 늘 걸려 있지만 메시지가 오갈 때만 (맡은 파티션은 멤버 칸의 p0,1)
+          if (!traced && (!r || quiet)) return; // 평소엔 안 그린다: 롱 폴링은 늘 걸려 있지만 메시지가 오갈 때만 (맡은 파티션은 멤버 칸의 p0,1)
           if (traced || r) tags += edgeTag(d, 'GET /fetch ⇄ 메시지', traced ? 'var(--data)' : partColor(g.topic, p), 0.7);
           back += `<path d="${d}" fill="none" stroke="${traced ? 'var(--data)' : partColor(g.topic, p)}" stroke-width="${traced ? 3.2 : width(r)}" stroke-dasharray="8 6"
             opacity="${traced ? 1 : r ? 0.85 : 0.3}" ${anim(r)}><title>${key} 의 리더 broker-${pm.leader} → ${m.id}</title></path>`;
