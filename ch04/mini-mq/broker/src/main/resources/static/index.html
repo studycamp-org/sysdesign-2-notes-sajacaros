@@ -35,6 +35,7 @@
   button:disabled { opacity: .5; cursor: default; }
   .sendbar { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; font-size: 13px; margin-bottom: 6px; }
   .sendbar .grp { display: flex; gap: 4px; align-items: center; }
+  #banner:empty { display: none; }
   #banner { background: var(--card); border: 2px solid var(--line); border-radius: 8px; margin: 2px 0 6px; padding: 5px 10px;
             font-size: 13px; line-height: 1.45; min-height: 34px; }
   .tabs { display: flex; gap: 6px; margin: -2px 0 10px; border-bottom: 1px solid var(--line); }
@@ -79,18 +80,18 @@
 <main>
   <section class="card">
     <div class="tabs" id="tabs">
-      <button data-view="simple" onclick="setView('simple')">① 기본 흐름 <span class="muted">생산자 → 파티션 → 소비자</span></button>
-      <button data-view="full" onclick="setView('full')">② 브로커 · 복제 <span class="muted">리더·팔로워 · 조정 서비스</span></button>
+      <button data-view="simple" onclick="setView('simple')">① 기본 흐름</button>
+      <button data-view="full" onclick="setView('full')">② 브로커 · 복제</button>
     </div>
     <div class="sendbar" id="sendbar"></div>
-    <div id="banner"><span class="muted">위 버튼으로 메시지를 보내면 그 한 건이 지나가는 단계를 천천히 보여 준다. 생산자는 같은 파티션 묶음이 5건 차야 실제로 보낸다 (덜 찬 묶음은 "지금 보내기").</span></div>
+    <div id="banner"></div>
     <div class="flowwrap">
       <svg id="flow" viewBox="0 0 1160 600" role="img" aria-label="생산자 → 브로커(파티션 사본) → 소비자 그룹"></svg>
       <svg id="overlay" viewBox="0 0 1160 600" aria-hidden="true"></svg>
     </div>
     <div class="legend">
       <span><i style="border-color:var(--data)"></i>데이터: 메시지가 움직임 (생산 · <span class="full-only">복제 · </span>소비)</span>
-      <span class="full-only"><i style="border-color:var(--ctrl);border-top-style:dashed"></i>컨트롤: 조정 서비스 세션 박동 · 지도(/metadata) · HW · ACK · 오프셋 커밋(/offsets)</span>
+      <span><i style="border-color:var(--ctrl);border-top-style:dashed"></i>컨트롤: 일어날 때만 그림</span>
       <span class="full-only">사본 줄: <b>★</b> 리더 · 실선 ISR · 점선 ISR 밖 · 같은 색 = 같은 파티션</span>
     </div>
   </section>
@@ -136,8 +137,8 @@ const anim = (r) => {
 };
 const curve = (x1, y1, x2, y2) => { const dx = (x2 - x1) * 0.5; return `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`; };
 // 같은 파티션의 사본은 같은 색 (토픽마다 색 계열을 달리)
-const PART_HUE = {logs: [28, 52, 4], orders: [200, 170, 232]};
-const partColor = (topic, p) => `hsl(${(PART_HUE[topic] || [280, 310, 250])[p % 3] + 40 * Math.floor(p / 3)} 62% 48%)`;
+const PART_HUE = {logs: [28, 52, 4, 145, 205], orders: [200, 170, 232]};
+const partColor = (topic, p) => { const h = PART_HUE[topic] || [280, 310, 250]; return `hsl(${h[p % h.length] + 40 * Math.floor(p / h.length)} 62% 48%)`; };
 
 // 데이터 = 메시지 자체가 움직이는 단계, 컨트롤 = 지도·HW·ACK·오프셋 커밋처럼 메시지에 관한 정보·응답이 오가는 단계
 const STEP_KIND = {map: 'ctrl', buffered: 'data', dispatched: 'data', stored: 'data', replicated: 'data', hw: 'ctrl', acked: 'ctrl', fetched: 'data', committed: 'ctrl', failed: 'ctrl'};
@@ -177,6 +178,11 @@ async function sendFrom(name, count) {
   } catch (e) { banner(null, `${name} 에 보내기 실패`, 'ctrl'); }
 }
 
+async function resetProducer(name) {
+  await fetch(`/admin/producers/${encodeURIComponent(name)}/reset`, {method: 'POST'}).catch(() => {});
+  stopReplay(); currentTrace = null; // 지난 추적도 지운다
+  refresh();
+}
 async function flushFrom(name) {
   await fetch(`/admin/producers/${encodeURIComponent(name)}/flush`, {method: 'POST'}).catch(() => {});
   refresh();
@@ -198,11 +204,12 @@ function sendbar(s) {
   const html = (s.producers || []).map(p => `<span class="grp">📨 <b>${esc(p.name)}</b> → ${esc(p.topic || '?')} (acks=${esc(p.acks || '?')})
       <button class="send" ${p.reachable && p.ready ? '' : 'disabled'} onclick="sendFrom('${esc(p.name)}', 1)">1건</button>
       <button class="send" ${p.reachable && p.ready ? '' : 'disabled'} onclick="sendFrom('${esc(p.name)}', 5)">5건</button>
-      <button ${p.reachable && p.ready ? '' : 'disabled'} onclick="flushFrom('${esc(p.name)}')" title="덜 찬 묶음도 지금 리더에게 보낸다">지금 보내기</button></span>`).join('');
+      <button ${p.reachable && p.ready ? '' : 'disabled'} onclick="flushFrom('${esc(p.name)}')" title="덜 찬 묶음도 지금 리더에게 보낸다">지금 보내기</button>
+      <button ${p.reachable && p.ready ? '' : 'disabled'} onclick="resetProducer('${esc(p.name)}')" title="생산자를 켜진 직후로: 지도(라우팅)와 버퍼를 비운다">초기화</button></span>`).join('');
   const el2 = lastElection(s);
   const elect = `<span class="grp">👑 컨트롤러 선출 ${el2 ? `<span class="muted">최근: broker-${el2.E.node} (${time(el2.E.at)})</span>` : ''}
-      <button class="send" style="background:var(--ctrl);border-color:var(--ctrl)" ${el2 ? '' : 'disabled'} onclick="startReplay('election')">천천히 보기</button></span>`;
-  const all = html + elect;
+      <button class="send" style="background:var(--ctrl);border-color:var(--ctrl)" ${el2 ? '' : 'disabled'} onclick="startReplay('election')">선출 과정 보기</button></span>`;
+  const all = elect + html; // 선출이 먼저 일어나고(컨트롤러가 지도를 그림) 그 다음에 메시지를 보낸다
   if (el.dataset.html !== all) { el.innerHTML = all; el.dataset.html = all; }
 }
 
@@ -257,7 +264,8 @@ function stepNext(manual) {
     if (replay.mode === 'election') {
       replay.playing = false;
       const E = replay.election.E;
-      banner(null, `끝: broker-${E.node} 가 컨트롤러가 됐다 (zxid ${E.term}). ${list.length}단계, 실제로는 ${list.at(-1).at - list[0].at}ms`, 'ctrl');
+      const core = list.filter(e => !e.kind.startsWith('route'));
+      banner(null, `끝: broker-${E.node} 가 컨트롤러가 됐다 (zxid ${E.term}). 선출 ${core.length}단계, 실제로는 ${core.at(-1).at - core[0].at}ms`, 'ctrl');
       return;
     }
     const tr = traceOf(lastState);
@@ -277,7 +285,11 @@ function banner(e, text, kind, t0) {
   b.style.borderColor = `var(--${kind})`;
   if (!e) { b.innerHTML = esc(text); return; }
   if (replay.mode === 'election') {
-    b.innerHTML = `${kindTag('ctrl')} <b>${replay.k}.</b> ${ZK_ICON[e.kind] || '•'} 🗂 ${esc(e.text)} <span class="muted">(zxid ${e.zxid}, 실제 +${e.at - t0}ms)</span>`;
+    b.innerHTML = e.kind === 'seen'
+      ? `${kindTag('ctrl')} <b>${replay.k}.</b> 👀 ${esc(e.text)} <span class="muted">(실제 +${e.at - t0}ms)</span>`
+      : e.kind.startsWith('route')
+      ? `${kindTag('ctrl')} <b>${replay.k}.</b> 🗺 ${esc(e.text)}${e.data ? ` <code>${esc(e.data)}</code>` : ''} <span class="muted">(실제 +${e.at - t0}ms)</span>`
+      : `${kindTag('ctrl')} <b>${replay.k}.</b> ${ZK_ICON[e.kind] || '•'} 🗂 ${esc(e.text)} <span class="muted">(zxid ${e.zxid}, 실제 +${e.at - t0}ms)</span>`;
   } else {
     b.innerHTML = `${kindTag(kind)} <b>${replay.k}.</b> ${STEP_ICON[e.step] || ''} ${esc(e.text)} <span class="muted">(실제 +${e.at - t0}ms)</span>`;
   }
@@ -339,9 +351,40 @@ function lastElection(s) {
     if (e.kind === 'set') return e.path === '/metadata' && e.seq > E.seq && sets++ < 2;
     return false;
   }).map(e => ({...e, node: who2id(e.who) ?? 0}));
+  // 새 컨트롤러가 /metadata 를 고친 직후의 감시 알림 (새 지도가 브로커들에게 퍼짐)
+  steps.filter(e => e.kind === 'set').forEach(st => {
+    const n = ev.find(e => e.kind === 'notify' && e.seq > st.seq && e.seq <= st.seq + 3);
+    if (n && !steps.some(x => x.seq === n.seq)) steps.push({...n, node: 0});
+  });
+  // /controller 를 만들려 하지 않은 브로커: 읽어 보니 이미 주인이 있어 감시만 했다 (조정 서비스는 읽기를 기록하지 않아 브로커 쪽 기록으로)
+  const tried = new Set(steps.filter(e => e.kind === 'created' || e.kind === 'create_conflict').map(e => e.node));
+  s.nodes.filter(n => n.reachable && !tried.has(n.id)).forEach(n => {
+    const seen = ((n.coord || {}).events || []).filter(x => x.kind === 'controller_seen' && x.at >= E.at - 200 && x.at <= E.at + 3000
+      && x.text.includes('broker-' + who2id(E.who))).sort((a, b) => a.at - b.at)[0];
+    if (seen) steps.push({kind: 'seen', at: seen.at, node: n.id, who: 'broker-' + n.id,
+      text: `broker-${n.id} 가 /controller 를 읽어 보니 이미 broker-${who2id(E.who)} → 만들지 않고 감시만 한다`});
+  });
+  steps.sort((a, b) => a.at - b.at);
+  // 그 다음: 생산자가 지도를 받아 가는가 (새 컨트롤러가 /metadata 를 고친 뒤 첫 GET /metadata)
+  const setAt = (steps.find(e => e.kind === 'set') || E).at;
+  const fetches = s.nodes.filter(n => n.reachable).flatMap(n => (n.metaFetches || []).map(f => ({...f, broker: n.id})));
+  (s.producers || []).forEach(pr => {
+    // 초기화(또는 재시작) 전의 요청은 지금 생산자의 것이 아니므로 뺀다
+    const f = fetches.filter(x => x.client === pr.name && x.at >= setAt && x.at >= (pr.since || 0)).sort((a, b) => a.at - b.at)[0];
+    const last = steps.length ? steps.at(-1).at : E.at;
+    const gap = f ? ((f.at - E.at) / 1000).toFixed(1) : 0;
+    steps.push(f
+      ? {kind: 'route', at: f.at, node: 0, who: pr.name, broker: f.broker,
+         text: `(선출 ${gap}초 뒤, 처음 보낼 때) ${pr.name} → broker-${f.broker}: GET /metadata`, data: `↩ v${f.version} · 컨트롤러 b${f.controllerId} · ${f.summary}`}
+      : {kind: 'route_none', at: last, node: 0, who: pr.name,
+         text: pr.metadataVersion == null
+           ? `${pr.name} 는 아직 지도가 없다. 처음 보낼 때 아무 브로커에게 GET /metadata 로 받는다`
+           : `${pr.name} 는 지도를 다시 받지 않았다 (들고 있는 지도 v${pr.metadataVersion}). 리더가 그대로면 옛 지도로 계속 보낸다. 409·연결 실패를 받을 때 다시 받는다`});
+  });
+  steps.sort((a, b) => a.at - b.at);
   return {E: {...E, node: who2id(E.who), term: E.zxid}, steps};
 }
-const ZK_ICON = {session_expired: '💀', deleted: '🗑', notify: '🔔', create_conflict: '✋', created: '👑', set: '📜'};
+const ZK_ICON = {session_expired: '💀', deleted: '🗑', notify: '🔔', create_conflict: '✋', created: '👑', set: '📜', route: '🗺', route_none: '🗺', seen: '👀'};
 /** 단계 k 까지 적용한 상태: /controller 주인, 브로커별 세션. */
 function electionState(list, k, ids) {
   const st = {holder: null, brokers: {}};
@@ -352,6 +395,7 @@ function electionState(list, k, ids) {
     if (e.kind === 'deleted' && e.path === '/controller') st.holder = null;
     if (e.kind === 'created') st.holder = b;
     if (e.kind === 'create_conflict' && st.brokers[b]) st.brokers[b].lost = true;
+    if (e.kind === 'seen' && st.brokers[b]) st.brokers[b].seen = true;
   });
   return st;
 }
@@ -365,7 +409,7 @@ function electionBase(e) {
     <rect x="${Z.x}" y="${Z.y}" width="${Z.w}" height="${Z.h}" rx="12" fill="none" stroke="${e && !e.node ? 'var(--ctrl)' : 'none'}" stroke-width="3.5"/>`;
   ids.forEach(b => {
     const {y} = GEO.BOX[b], x0 = GEO.PX - GEO.PW / 2, n = st.brokers[b];
-    const label = st.holder === b ? '👑 컨트롤러' : !n.session ? '💀 세션 만료' : n.lost ? '브로커 (자리 경쟁에서 짐)' : '브로커';
+    const label = st.holder === b ? '👑 컨트롤러' : !n.session ? '💀 세션 만료' : n.lost ? '브로커 (자리 경쟁에서 짐)' : n.seen ? '브로커 (이미 있어 감시만)' : '브로커';
     const color = st.holder === b ? 'var(--accent)' : !n.session ? 'var(--bad)' : 'var(--muted)';
     const active = e && e.node === b;
     out += `<rect x="${x0 + 2}" y="${y + 2}" width="${GEO.PW - 4}" height="44" rx="10" fill="var(--card)"/>
@@ -390,11 +434,26 @@ function playElection(e, t0) {
   if ((e.kind === 'created' || e.kind === 'create_conflict') && has) // 브로커 → 조정 서비스: /controller 만들기 → 성공/실패
     return moveDot(base, zkPath(b), 'var(--ctrl)', '6 5', {pingpong: true, backColor: e.kind === 'created' ? 'var(--ok)' : 'var(--bad)'});
   if (e.kind === 'set' && has) return moveDot(base, zkPath(b), 'var(--ctrl)', '6 5'); // 새 컨트롤러가 /metadata 에 "컨트롤러 = 나"
+  if (e.kind === 'seen' && has) return moveDot(base, zkPath(b), 'var(--ctrl)', '6 5', {pingpong: true}); // 읽기 → 이미 있음
   if (e.kind === 'notify') { // 조정 서비스 → 기다리던 브로커들
     const ids = Object.keys(GEO.BOX).map(Number), st = electionState(replay.steps, replay.k, ids);
     return moveDots(base, ids.filter(x => st.brokers[x].session).map(x => zkPath(x)), 'var(--ctrl)', true);
   }
   if (e.kind === 'session_expired' && has) { const [x, y] = brokerPt(b); return pulse(base, x - 20, y, 'var(--bad)'); }
+  const rp = GEO.ROUTE && GEO.ROUTE[e.who];
+  if (e.kind === 'route' && rp && GEO.BOX[e.broker]) { // 생산자 라우팅 → 부트스트랩 브로커: GET /metadata → 지도
+    const [sx, sy] = rp, bx = GEO.PX - GEO.PW / 2, by = GEO.BOX[e.broker].y + 22;
+    // 실시간 "GET /metadata" 상자와 같은 자리·모양으로 덮어 그린다 (↩ v · 컨트롤러 · 토픽 / 파티션→리더)
+    const parts = e.data.split(' · '), sum = parts.slice(2).join(' · '), sp = sum.indexOf(' ');
+    const line2 = parts.slice(0, 2).join(' · ') + ' · ' + (sp > 0 ? sum.slice(0, sp) : sum), line3 = sp > 0 ? sum.slice(sp + 1) : '';
+    const lx = sx - 240, ly = sy + 64; // 실시간 상자: x0 + 10 = sx - 240
+    const label = `<rect x="${lx}" y="${ly}" width="270" height="60" rx="8" fill="var(--card)" stroke="var(--ctrl)" stroke-width="2"/>
+      <text x="${lx + 10}" y="${ly + 17}" font-size="11.5" font-weight="700" fill="var(--ctrl)">🗺 GET /metadata → broker-${e.broker} <tspan font-weight="400" fill="var(--muted)">⏪ 재생</tspan></text>
+      <text x="${lx + 10}" y="${ly + 34}" font-size="11" font-family="ui-monospace,monospace">${esc(line2)}</text>
+      <text x="${lx + 24}" y="${ly + 51}" font-size="11" font-family="ui-monospace,monospace">${esc(line3)}</text>`;
+    return moveDot(base + label, `M${sx},${sy} C${sx},${sy - 60} ${bx - 70},${by} ${bx},${by}`, 'var(--ctrl)', '6 5', {pingpong: true, backColor: 'var(--ok)'});
+  }
+  if (e.kind === 'route_none' && rp) return pulse(base, rp[0], rp[1], 'var(--warn)');
   const [x, y] = zkPt();
   pulse(base, x - 30, y, e.kind === 'deleted' ? 'var(--warn)' : 'var(--ctrl)');
 }
@@ -435,40 +494,19 @@ function draw(s) {
   const rowL = (key, b) => [PX - PW / 2 + 10, ROW[`${key}|${b}`]];
   const rowR = (key, b) => [PX + PW / 2 - 10, ROW[`${key}|${b}`]];
   const head = b => BOX[b] ? BOX[b].y + 22 : null;
-  if (!full) {
-    let y = 30;
-    const RH = 40;
-    topics.forEach(t => {
-      mid += `<text x="${PX - PW / 2}" y="${y + 14}" font-size="13" font-weight="700">${esc(t.name)} <tspan font-weight="400" font-size="11.5" fill="var(--muted)">파티션 ${t.partitions.length}개 · 순서는 파티션 안에서만</tspan></text>`;
-      y += 24;
-      t.partitions.forEach(p => {
-        const key = `${t.name}-${p.partition}`, cy = y + RH / 2, col = partColor(t.name, p.partition);
-        ROW[`${key}|${p.leader}`] = cy;
-        const lead = (reps[key] || {})[p.leader], n = lead ? lead.highWatermark : null;
-        const traced = tr && tr.key === key, stored = traced && tr.has('stored');
-        const x0 = PX - PW / 2;
-        mid += `<rect x="${x0}" y="${y}" width="${PW}" height="${RH}" rx="9" fill="${col}" fill-opacity=".1" stroke="${stored ? 'var(--data)' : col}" stroke-width="${stored ? 3 : 1.4}"/>
-          <rect x="${x0}" y="${y}" width="7" height="${RH}" rx="3" fill="${col}"/>
-          <text x="${x0 + 16}" y="${cy + 5}" font-size="14" font-weight="700">${key}</text>
-          ${traced ? `<text x="${x0 + 92}" y="${cy + 5}" font-size="12" font-weight="700" fill="var(--data)">📨 offset ${tr.t.offset}</text>` : ''}
-          <text x="${x0 + PW - 12}" y="${cy + 5}" text-anchor="end" font-size="11.5" fill="var(--muted)">${n == null ? '리더 응답 없음' : n ? `메시지 ${n}건 (offset 0~${n - 1})` : '비어 있음'}</text>`;
-        y += RH + 8;
-      });
-      y += 14;
-    });
-    brokersH = y;
-  } else {
-  const HEADH = 50, RH = 32, TOPH = 20;
+  // ① 은 브로커마다 자기가 리더인 파티션만, ② 는 리더·팔로워 사본 전부. 조정 서비스는 둘 다 보인다
+  const HEADH = 34, RH = full ? 32 : 36, TOPH = topics.length > 1 ? 20 : 0; // 토픽이 하나면 토픽 이름 줄 생략
   ZK = {x: PX - PW / 2, y: 30, w: PW, h: 124};
   let y = ZK.y + ZK.h + 26;
   Object.keys(meta.brokers).map(Number).sort((a, b) => a - b).forEach(b => {
     const n = nodes.find(x => x.id === b) || {id: b};
     const r = n.reachable ? n.coord : null, info = meta.brokers[b] || {};
-    const sections = topics.map(t => ({t, parts: t.partitions.filter(p => p.replicas.includes(b))})).filter(x => x.parts.length);
+    const sections = topics.map(t => ({t, parts: t.partitions.filter(p => full ? p.replicas.includes(b) : p.leader === b)})).filter(x => x.parts.length);
     const h = HEADH + sections.reduce((a, x) => a + TOPH + x.parts.length * RH, 0) + 8;
     BOX[b] = {y, h};
     const flags = [];
     if (!n.reachable) flags.push(['응답 없음', 'var(--bad)']);
+    else if (!r.session) flags.push(['세션 없음', 'var(--bad)']);
     else {
       if (r.isolated) flags.push(['🔌 고립', 'var(--bad)']);
       if (info.alive === false) flags.push(['죽음 표시', 'var(--bad)']);
@@ -478,15 +516,26 @@ function draw(s) {
     mid += `<g opacity="${n.reachable && !(r && r.isolated) ? 1 : 0.45}">
       <rect x="${PX - PW / 2}" y="${y}" width="${PW}" height="${h}" rx="12" fill="var(--card)" stroke="${C(b)}" stroke-width="${b === ctrl ? 3 : 1.6}"/>
       <text x="${PX - PW / 2 + 14}" y="${y + 21}" font-weight="700" font-size="14">broker-${b}${b === ctrl ? ' 👑 컨트롤러' : ''}</text>
-      <text x="${PX + PW / 2 - 12}" y="${y + 21}" text-anchor="end" font-size="11.5" fill="var(--muted)">${r ? (r.session ? `세션 ${r.session}` : '<tspan fill="var(--bad)">세션 없음</tspan>') + (b === ctrl ? ` · epoch ${r.epoch}` : '') : ''}</text>
-      <text x="${PX - PW / 2 + 14}" y="${y + 39}" font-size="11.5" fill="var(--muted)">${coords.length ? `그룹 코디네이터: ${coords.map(esc).join(', ')} ` : ''}${flags.map(([t, c]) => `<tspan fill="${c}" font-weight="700">${esc(t)} </tspan>`).join('')}</text>`;
+      <text x="${PX + PW / 2 - 12}" y="${y + 21}" text-anchor="end" font-size="11.5" fill="var(--muted)">${flags.map(([t, c]) => `<tspan fill="${c}" font-weight="700">${esc(t)} </tspan>`).join('')}${coords.length ? `<title>그룹 코디네이터</title>🤝 ${coords.map(esc).join(', ')}` : ''}</text>`;
     let ry = y + HEADH;
     sections.forEach(({t, parts}) => {
-      mid += `<text x="${PX - PW / 2 + 14}" y="${ry + 14}" font-size="11" font-weight="700" fill="var(--muted)">${esc(t.name)}</text>`;
+      if (TOPH) mid += `<text x="${PX - PW / 2 + 14}" y="${ry + 14}" font-size="11" font-weight="700" fill="var(--muted)">${esc(t.name)}</text>`;
       ry += TOPH;
       parts.forEach(p => {
         const key = `${t.name}-${p.partition}`, cy = ry + RH / 2, col = partColor(t.name, p.partition);
         ROW[`${key}|${b}`] = cy;
+        if (!full) { // ①: 리더 파티션 한 줄 (메시지 수만)
+          const lead = (reps[key] || {})[b], n = lead ? lead.highWatermark : null;
+          const traced = tr && tr.key === key, stored = traced && tr.has('stored');
+          const x0 = PX - PW / 2 + 10, w = PW - 20;
+          mid += `<rect x="${x0}" y="${cy - RH / 2 + 3}" width="${w}" height="${RH - 6}" rx="7" fill="${col}" fill-opacity=".12" stroke="${stored ? 'var(--data)' : col}" stroke-width="${stored ? 3 : 1.4}"/>
+            <rect x="${x0}" y="${cy - RH / 2 + 3}" width="6" height="${RH - 6}" rx="3" fill="${col}"/>
+            <text x="${x0 + 14}" y="${cy + 5}" font-size="13.5" font-weight="700">${key}</text>
+            ${traced ? `<text x="${x0 + 86}" y="${cy + 5}" font-size="12" font-weight="700" fill="var(--data)">📨 offset ${tr.t.offset}</text>` : ''}
+            <text x="${x0 + w - 10}" y="${cy + 5}" text-anchor="end" font-size="11.5" fill="var(--muted)">${n == null ? '응답 없음' : `${n}건`}</text>`;
+          ry += RH;
+          return;
+        }
         const isLeader = p.leader === b, inIsr = p.isr.includes(b);
         const rep = (reps[key] || {})[b], lead = (reps[key] || {})[p.leader];
         const traced = tr && tr.key === key;
@@ -510,7 +559,7 @@ function draw(s) {
     y += h + 22;
   });
   brokersH = y;
-  GEO = {PX, PW, BOX, ZK};
+  GEO = {PX, PW, BOX, ZK, ROUTE: {}};
 
   // ---- 조정 서비스 (ZooKeeper-lite) 상자와 브로커 세션 선
   const zk = s.zk || {};
@@ -520,26 +569,45 @@ function draw(s) {
   const regs = Object.keys(zkNodes).filter(p => p.startsWith('/brokers/')).map(p => p.slice(9)).sort();
   mid += `<g opacity="${zk.reachable === false ? 0.45 : 1}">
     <rect x="${ZK.x}" y="${ZK.y}" width="${ZK.w}" height="${ZK.h}" rx="12" fill="var(--card)" stroke="var(--ctrl)" stroke-width="2"/>
-    <text x="${ZK.x + 14}" y="${ZK.y + 21}" font-weight="700" font-size="14">🗂 ZooKeeper-lite <tspan font-weight="400" font-size="11.5" fill="var(--muted)">조정 서비스 · 1대</tspan></text>
+    <text x="${ZK.x + 14}" y="${ZK.y + 21}" font-weight="700" font-size="14">🗂 ZooKeeper-lite </text>
     <text x="${ZK.x + ZK.w - 12}" y="${ZK.y + 21}" text-anchor="end" font-size="11" fill="var(--muted)">${zk.reachable === false ? '<tspan fill="var(--bad)">응답 없음</tspan>' : `zxid ${zk.zxid ?? '?'}`}</text>
-    <text x="${ZK.x + 14}" y="${ZK.y + 44}" font-size="12"><tspan font-weight="700">/controller</tspan> <tspan fill="var(--muted)">(임시 노드)</tspan> → ${zc ? `<tspan font-weight="700" fill="var(--accent)">broker-${esc(zc.data)}</tspan> <tspan fill="var(--muted)">epoch ${zc.czxid}</tspan>` : '<tspan fill="var(--warn)">비어 있음</tspan>'}</text>
-    <text x="${ZK.x + 14}" y="${ZK.y + 64}" font-size="12"><tspan font-weight="700">/brokers</tspan> <tspan fill="var(--muted)">(임시 노드 = 살아 있는 브로커)</tspan> → ${regs.length ? regs.map(r => `broker-${r}`).join(' · ') : '없음'}</text>
-    <text x="${ZK.x + 14}" y="${ZK.y + 84}" font-size="12"><tspan font-weight="700">/metadata</tspan> <tspan fill="var(--muted)">(지도: 토픽·사본·ISR)</tspan> → 버전 ${zm ? zm.version : '?'}</text>
-    <text x="${ZK.x + 14}" y="${ZK.y + 104}" font-size="12"><tspan font-weight="700">/offsets</tspan> <tspan fill="var(--muted)">(상태 저장소: 그룹별 오프셋)</tspan> → ${(() => {
+    <text x="${ZK.x + 14}" y="${ZK.y + 44}" font-size="12"><tspan font-weight="700">/controller</tspan> → ${zc ? `<tspan font-weight="700" fill="var(--accent)">broker-${esc(zc.data)}</tspan> <tspan fill="var(--muted)">epoch ${zc.czxid}</tspan>` : '<tspan fill="var(--warn)">비어 있음</tspan>'}</text>
+    <text x="${ZK.x + 14}" y="${ZK.y + 64}" font-size="12"><tspan font-weight="700">/brokers</tspan> → ${regs.length ? regs.map(r => `broker-${r}`).join(' · ') : '없음'}</text>
+    <text x="${ZK.x + 14}" y="${ZK.y + 84}" font-size="12"><tspan font-weight="700">/metadata</tspan> → 버전 ${zm ? zm.version : '?'}</text>
+    <text x="${ZK.x + 14}" y="${ZK.y + 104}" font-size="12"><tspan font-weight="700">/offsets</tspan> → ${(() => {
       const by = {}; zkOffsets(s).forEach(o => { (by[o.group] ||= []).push(`${o.partition}:${o.offset}`); });
-      return Object.keys(by).length ? Object.entries(by).map(([g, v]) => `${esc(g)} ${v.sort().join(' ')}`).join(' · ') : '없음';
+      // 그룹이 많으면 상자를 넘치므로 그룹 이름만 보이고, 파티션:오프셋 은 마우스를 올리면 보인다
+      return Object.keys(by).length ? Object.entries(by).map(([g, v]) => `<tspan><title>${esc(g)}  파티션:오프셋  ${v.sort().join(' ')}</title>${esc(g)}</tspan>`).join(' · ') : '없음';
     })()}</text></g>`;
+  // 컨트롤 선(청록)은 평소엔 그리지 않고, 일이 일어났을 때만 RECENT 동안 그린다
+  const RECENT = 6000, now = Date.now();
+  const zkRecent = (zk.events || []).filter(e => now - e.at < RECENT);
   const sessions = {};
   (zk.sessions || []).forEach(x => { sessions[x.name] = x; });
   Object.keys(BOX).map(Number).forEach(b => {
     const se = sessions['broker-' + b], ok = se && se.lastPingAgoMs < 1500;
+    // 세션 선: 세션이 없을 때(빨강) 또는 그 브로커의 세션·임시 노드 이벤트가 방금 있었을 때만
+    if (se && !zkRecent.some(e => e.who === 'broker-' + b)) return;
     const x1 = ZK.x + ZK.w, y1 = ZK.y + ZK.h / 2, x2 = PX + PW / 2, y2 = head(b), bulge = 40 + Math.abs(y2 - y1) / 12;
     back += `<path d="M${x1},${y1} C${x1 + bulge},${y1} ${x2 + bulge},${y2} ${x2},${y2}" fill="none" stroke="${se ? 'var(--ctrl)' : 'var(--bad)'}" stroke-width="1.5"
       stroke-dasharray="3 5" opacity="${se ? 0.7 : 0.5}" ${ok ? anim(2) : ''}><title>broker-${b} ↔ ZooKeeper-lite 세션 ${se ? `${se.id} (박동 ${(se.lastPingAgoMs / 1000).toFixed(1)}초 전)` : '없음'}</title></path>`;
   });
 
-  // 복제: 리더 줄 → 팔로워 줄 (데이터, 오른쪽)
-  topics.forEach(t => t.partitions.forEach(p => {
+  // 컨트롤러가 /metadata 를 고침 → 조정 서비스가 감시 중인 브로커들에게 알림 → 브로커가 새 지도를 받아 둔다
+  const metaSet = zkRecent.filter(e => e.kind === 'set' && e.path === '/metadata').sort((a, b) => b.at - a.at)[0];
+  if (metaSet) {
+    const w = Number((metaSet.who || '').replace('broker-', ''));
+    Object.keys(BOX).map(Number).forEach(b => {
+      const x1 = ZK.x + ZK.w, y1 = ZK.y + 84, x2 = PX + PW / 2, y2 = head(b), bulge = 60 + Math.abs(y2 - y1) / 10;
+      const writer = b === w;
+      back += `<path d="M${x2},${y2} C${x2 + bulge},${y2} ${x1 + bulge},${y1} ${x1},${y1}" fill="none" stroke="var(--ctrl)" stroke-width="${writer ? 2.6 : 1.6}"
+        stroke-dasharray="${writer ? '' : '3 5'}" opacity=".9"><title>${writer ? `📜 컨트롤러 broker-${b} 가 /metadata 를 고침` : `🔔 /metadata 감시 알림 → broker-${b} 가 새 지도를 받아 둠`}</title></path>`;
+    });
+    mid += `<text x="${ZK.x + 4}" y="${ZK.y + ZK.h + 17}" font-size="11" font-weight="700" fill="var(--ctrl)">📜 ${esc(metaSet.who)} 가 /metadata 고침 → 🔔 브로커들에 알림</text>`;
+  }
+
+  // 복제: 리더 줄 → 팔로워 줄 (데이터, 오른쪽). ② 에서만
+  if (full) topics.forEach(t => t.partitions.forEach(p => {
     const key = `${t.name}-${p.partition}`, lead = (reps[key] || {})[p.leader];
     if (!lead || !ROW[`${key}|${p.leader}`]) return;
     p.replicas.forEach(f => {
@@ -558,7 +626,6 @@ function draw(s) {
         <title>${key}: broker-${p.leader} → broker-${f} 복제 (팔로워가 가져감) ${st ? `· ${lag}건 뒤, ${(st.lastFetchAgoMs / 1000).toFixed(1)}초 전` : '· 아직 안 옴'}</title></path>`;
     });
   }));
-  } // ② 끝
 
   // ---- 왼쪽: 생산자 (🧺 버퍼 → 🧭 라우팅)
   const QX = 160, QW = 290, SLOT = 15;
@@ -566,7 +633,8 @@ function draw(s) {
   (s.producers || []).forEach(pr => {
     const tm = meta.topics[pr.topic];
     const nparts = tm ? tm.partitions.length : 0, batch = pr.batchSize || 5;
-    const bufH = 40 + nparts * 22, routH = 48, h = 32 + bufH + 8 + routH + 10;
+    const bufH = 26 + nparts * 22, routH = 48;
+    let h = 32 + bufH + 8 + routH + 10;
     const x0 = QX - QW / 2, bufY = qy + 32, routY = bufY + bufH + 8;
     const mineTopic = tr && tr.t && tr.t.topic === pr.topic;
     front += `<g opacity="${pr.reachable && pr.ready ? 1 : 0.5}">
@@ -574,12 +642,11 @@ function draw(s) {
       <text x="${x0 + 12}" y="${qy + 21}" font-weight="700" font-size="14">${esc(pr.name)}</text>
       <text x="${x0 + QW - 12}" y="${qy + 21}" text-anchor="end" font-size="11.5" fill="var(--muted)">→ ${esc(pr.topic)} · acks=${esc(pr.acks)}</text>
       <rect x="${x0 + 10}" y="${bufY}" width="${QW - 20}" height="${bufH}" rx="8" fill="var(--bg)" stroke="var(--line)"/>
-      <text x="${x0 + 20}" y="${bufY + 17}" font-size="12" font-weight="700">🧺 버퍼</text>
-      <text x="${x0 + 20}" y="${bufY + 32}" font-size="10.5" fill="var(--muted)">hash(key) % ${nparts} → 파티션별 묶음 · ${batch}건이 차면 보냄${pr.lingerMs > 0 ? ` (또는 ${pr.lingerMs / 1000}초 뒤)` : ''}</text>`;
+      <text x="${x0 + 20}" y="${bufY + 17}" font-size="12" font-weight="700">🧺 버퍼 <tspan font-weight="400" font-size="10.5" fill="var(--muted)">hash(key) % ${nparts}</tspan></text>`;
     const buf = {};
     (pr.buffer || []).forEach(bb => { buf[bb.partition] = bb; });
     for (let p = 0; p < nparts; p++) {
-      const ry = bufY + 39 + p * 22, bb = buf[p], keys = bb ? bb.keys : [];
+      const ry = bufY + 25 + p * 22, bb = buf[p], keys = bb ? bb.keys : [];
       front += `<text x="${x0 + 22}" y="${ry + 12}" font-size="11" fill="${partColor(pr.topic, p)}" font-weight="700">p${p}</text>`;
       for (let i = 0; i < batch; i++) {
         const k = keys[i], cx = x0 + 46 + i * (SLOT + 4);
@@ -589,35 +656,43 @@ function draw(s) {
         if (mine) SEG.buffered = [cx + SLOT / 2, ry + SLOT / 2];
       }
       if (bb) {
-        const when = pr.lingerMs > 0 ? ` · ${Math.max(0, (pr.lingerMs - bb.ageMs) / 1000).toFixed(1)}초 뒤 보냄` : ` · ${batch - keys.length}건 더 차면 보냄`;
+        const when = pr.lingerMs > 0 ? ` · ${Math.max(0, (pr.lingerMs - bb.ageMs) / 1000).toFixed(1)}초` : '';
         front += `<text x="${x0 + 46 + batch * (SLOT + 4) + 6}" y="${ry + 12}" font-size="11" fill="var(--muted)">${keys.length}/${batch}${when}</text>`;
       }
     }
-    if (!SEG.buffered && mineTopic) SEG.buffered = [x0 + 46 + 2 * (SLOT + 4), bufY + 39 + tr.t.partition * 22 + SLOT / 2];
+    if (!SEG.buffered && mineTopic) SEG.buffered = [x0 + 46 + 2 * (SLOT + 4), bufY + 25 + tr.t.partition * 22 + SLOT / 2];
     const leaders = pr.leaders || {};
     front += `<rect x="${x0 + 10}" y="${routY}" width="${QW - 20}" height="${routH}" rx="8" fill="var(--bg)" stroke="var(--line)"/>
       <text x="${x0 + 20}" y="${routY + 17}" font-size="12" font-weight="700">🧭 라우팅</text>
-      <text x="${x0 + QW - 20}" y="${routY + 17}" text-anchor="end" font-size="10.5" fill="var(--ctrl)">지도 v${pr.metadataVersion ?? '?'} (컨트롤러 broker-${pr.controllerId ?? '?'} 가 그림)</text>
-      <text x="${x0 + 20}" y="${routY + 36}" font-size="11" fill="var(--muted)">${Object.entries(leaders).map(([p, l]) => `p${p} → broker-${l}`).join(' · ')}</text></g>`;
+      <text x="${x0 + QW - 20}" y="${routY + 17}" text-anchor="end" font-size="10.5" fill="${pr.metadataVersion == null ? 'var(--muted)' : 'var(--ctrl)'}">${pr.metadataVersion == null ? '지도 없음' : `지도 v${pr.metadataVersion}`}</text>
+      <text x="${x0 + 20}" y="${routY + 36}" font-size="11" fill="var(--muted)">${pr.metadataVersion == null ? '처음 보낼 때 받는다' : Object.entries(leaders).map(([p, l]) => `p${p}→b${l}`).join('  ')}</text></g>`;
     // 라우팅 → 각 파티션 리더 (데이터)
     const routeX = x0 + QW - 10, routeY = routY + routH / 2;
     if (tm) tm.partitions.forEach(p => {
-      const key = `${pr.topic}-${p.partition}`;
-      if (!ROW[`${key}|${p.leader}`]) return;
+      const key = `${pr.topic}-${p.partition}`, lead = leaders[p.partition]; // 생산자가 들고 있는 지도의 리더 (없거나 낡았을 수 있다)
+      if (lead == null || !ROW[`${key}|${lead}`]) return;
       const rate = live.filter(t => t.kind === 'produce' && t.client === pr.name && t.topic === pr.topic && t.partition === p.partition).reduce((a, t) => a + t.rate, 0);
-      const d = curve(routeX, routeY, ...rowL(key, p.leader));
+      const d = curve(routeX, routeY, ...rowL(key, lead));
       if (tr && tr.key === key) SEG.dispatched = d;
       const traced = tr && tr.key === key && tr.has('dispatched');
       back += `<path d="${d}" fill="none" stroke="${traced ? 'var(--data)' : partColor(pr.topic, p.partition)}" stroke-width="${traced ? 3.2 : width(rate)}"
-        stroke-dasharray="8 6" opacity="${traced ? 1 : rate ? 0.85 : 0.3}" ${anim(rate)}><title>${pr.name} → ${key} 의 리더 broker-${p.leader}</title></path>`;
+        stroke-dasharray="8 6" opacity="${traced ? 1 : rate ? 0.85 : 0.3}" ${anim(rate)}><title>${pr.name} → ${key} 의 리더 broker-${lead} (생산자의 지도 기준)</title></path>`;
     });
-    // 지도: 조정 서비스의 /metadata (컨트롤러가 씀) → 브로커가 들고 있다가 생산자에게 → 라우팅 (컨트롤)
-    if (full) {
-      const d = `M${ZK.x},${ZK.y + 84} C${QX + 80},${ZK.y + 84} ${x0 + QW - 40},${routY - 30} ${x0 + QW - 40},${routY}`;
-      if (mineTopic) SEG.map = d;
-      const traced = mineTopic && tr.has('map');
-      back += `<path d="${d}" fill="none" stroke="var(--ctrl)" stroke-width="${traced ? 2.4 : 1.2}" stroke-dasharray="3 5" opacity="${traced ? 1 : 0.35}">
-        <title>지도 = 조정 서비스의 /metadata. 컨트롤러 broker-${ctrl} 만 고치고, 브로커들이 감시로 받아 생산자에게 준다</title></path>`;
+    // 지도: 생산자는 조정 서비스·컨트롤러에 묻지 않는다. 부트스트랩 브로커 아무에게나 GET /metadata 를 하고
+    // 그 브로커는 조정 서비스의 /metadata 를 감시해 들고 있던 사본을 돌려준다. 시작할 때와 리더가 아니라는 답(409)·연결 실패 때만
+    GEO.ROUTE[pr.name] = [x0 + QW - 40, routY];
+    if (mineTopic) SEG.map = [x0 + QW - 70, routY + 14]; // 한 건 추적의 🗺 단계 = 캐시한 지도를 본다 (요청 없음)
+    const asked = traffic.filter(t => t.kind === 'metadata' && t.client === pr.name && t.agoMs < RECENT).sort((a, b) => a.agoMs - b.agoMs)[0];
+    if (asked && BOX[asked.broker]) {
+      const sx = x0 + QW - 40, sy = routY, bx = PX - PW / 2, by = head(asked.broker);
+      back += `<path d="M${sx},${sy} C${sx},${sy - 60} ${bx - 70},${by} ${bx},${by}" fill="none" stroke="var(--ctrl)" stroke-width="2.4" stroke-dasharray="3 5">
+        <title>${pr.name} → broker-${asked.broker}: GET /metadata (${(asked.agoMs / 1000).toFixed(1)}초 전)</title></path>`;
+      const ly = qy + h + 6, lead = Object.entries(leaders).map(([p, l]) => `p${p}→b${l}`).join(' ');
+      front += `<rect x="${x0 + 10}" y="${ly}" width="${QW - 20}" height="60" rx="8" fill="var(--card)" stroke="var(--ctrl)" stroke-width="1.6"/>
+        <text x="${x0 + 20}" y="${ly + 17}" font-size="11.5" font-weight="700" fill="var(--ctrl)">🗺 GET /metadata → broker-${asked.broker} <tspan font-weight="400" fill="var(--muted)">${(asked.agoMs / 1000).toFixed(1)}초 전</tspan></text>
+        <text x="${x0 + 20}" y="${ly + 34}" font-size="11" font-family="ui-monospace,monospace">↩ ${esc(asked.detail || '')} · 컨트롤러 b${pr.controllerId ?? '?'} · ${esc(pr.topic)}</text>
+        <text x="${x0 + 34}" y="${ly + 51}" font-size="11" font-family="ui-monospace,monospace">${lead}</text>`;
+      h += 66;
     }
     qy += h + 24;
   });
@@ -642,9 +717,10 @@ function draw(s) {
         <text x="${x0 + 10}" y="${gy + 17}" font-size="12" font-weight="700">${esc(g.group)} <tspan font-weight="400" fill="var(--muted)">← ${esc(g.topic)}</tspan></text>
         <text x="${x0 + GW - 10}" y="${gy + 17}" text-anchor="end" font-size="11" fill="${color}" font-weight="600"><title>세대(generation): 재조정이 끝날 때마다 1씩 오른다</title>세대 ${g.generation} · ${label}</text>`;
       // 그룹 → 코디네이터 브로커 (컨트롤)
-      if (BOX[g.coordinator]) {
+      const committing = traffic.some(t => t.kind === 'commit' && t.detail === g.group && t.agoMs < RECENT);
+      if (BOX[g.coordinator] && (g.state !== 'STABLE' || committing)) {
         const d = `M${x0},${gy + 12} C${x0 - 40},${gy + 12} ${PX + PW / 2 + 60},${head(g.coordinator)} ${PX + PW / 2},${head(g.coordinator)}`;
-        back += `<path d="${d}" fill="none" stroke="var(--ctrl)" stroke-width="1.3" stroke-dasharray="2 5" opacity=".45"><title>그룹 ${g.group} 의 코디네이터 = broker-${g.coordinator} (박동·합류·오프셋 커밋)</title></path>`;
+        back += `<path d="${d}" fill="none" stroke="var(--ctrl)" stroke-width="1.8" stroke-dasharray="2 5" opacity=".85"><title>${committing ? '📌 오프셋 커밋' : '⏳ 재조정'}: 그룹 ${g.group} 의 코디네이터 = broker-${g.coordinator} (박동·합류·오프셋 커밋)</title></path>`;
       }
       g.members.forEach((m, i) => {
         const my = gy + GHEAD + i * (MH + MG) + MH / 2, mx = CXc;
@@ -667,9 +743,8 @@ function draw(s) {
           SEG[`committed|group ${g.group}`] = d;
           if (tr.has('committed', 'group ' + g.group)) tracePath += `<path d="${d}" fill="none" stroke="var(--ctrl)" stroke-width="2.4" stroke-dasharray="3 5"><title>오프셋 커밋: 코디네이터 broker-${g.coordinator} 를 거쳐 ZooKeeper-lite /offsets 에 기록</title></path>`;
         }
-        if (!full && tr && tr.key && tr.key.startsWith(g.topic + '-') && m.assigned.includes(tr.t.partition)) SEG[`committed|group ${g.group}`] = [mx + NW / 2 - 20, my];
         const tag = m.id.slice(m.id.lastIndexOf('#'));
-        const sub = idle ? (g.state === 'STABLE' ? '놀고 있음 (파티션 < 소비자)' : '배정 기다리는 중') : `파티션 ${m.assigned.join(',')} · lag ${mlag}`;
+        const sub = idle ? (g.state === 'STABLE' ? '놀고 있음' : '배정 대기') : `p${m.assigned.join(',')} · lag ${mlag}`;
         front += `<g opacity="${idle ? 0.5 : 1}">
           <rect x="${mx - NW / 2}" y="${my - MH / 2}" width="${NW}" height="${MH}" rx="9" fill="var(--card)"
             stroke="${fetched ? 'var(--data)' : 'var(--line)'}" stroke-width="${fetched ? 3.5 : m.id === g.leader ? 2.2 : 1.2}"/>
@@ -693,8 +768,8 @@ function draw(s) {
     }
   }
 
-  const heads = `<text x="${QX}" y="18" text-anchor="middle" font-size="12" fill="var(--muted)">생산자 (클라이언트 라이브러리)</text>
-    <text x="${PX}" y="18" text-anchor="middle" font-size="12" fill="var(--muted)">${full ? '브로커 (파티션 사본) · 조정 서비스' : '토픽 · 파티션'}</text>
+  const heads = `<text x="${QX}" y="18" text-anchor="middle" font-size="12" fill="var(--muted)">생산자</text>
+    <text x="${PX}" y="18" text-anchor="middle" font-size="12" fill="var(--muted)">브로커 · 조정 서비스</text>
     <text x="${CXc}" y="18" text-anchor="middle" font-size="12" fill="var(--muted)">소비자 그룹</text>`;
   const fullH = Math.max(brokersH, qy, gy) + 10;
   const el = document.getElementById('flow');
@@ -711,7 +786,7 @@ function traceView(s, tr) {
     document.getElementById('trTitle').textContent = `👑 컨트롤러 선출: broker-${E.node} 가 /controller 를 차지 (zxid ${E.term})`;
     body.innerHTML = list.map((e, i) => {
       const cls = i >= replay.k ? 'future' : i === replay.k - 1 ? 'cur' : '';
-      return `<tr class="${cls}"><td>+${e.at - t0}ms</td><td>${kindTag('ctrl')}${ZK_ICON[e.kind] || '•'} ${esc(e.text)}</td></tr>`;
+      return `<tr class="${cls}"><td>+${e.at - t0}ms</td><td>${kindTag('ctrl')}${ZK_ICON[e.kind] || '•'} ${esc(e.text)}${e.data ? ` <code>${esc(e.data)}</code>` : ''}</td></tr>`;
     }).join('');
     return;
   }

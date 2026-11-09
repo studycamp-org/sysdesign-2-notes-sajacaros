@@ -61,6 +61,13 @@ public class BrokerApi {
     public ClusterMetadata metadata(@RequestHeader(value = CLIENT, required = false) String client) {
         ClusterMetadata m = coord.committed();
         traffic.record(client, "metadata", "", -1, 1, "v" + m.version());
+        // 받아 간 지도 요약: 토픽마다 p0→b1 p1→b2 … (내부 토픽 제외)
+        StringBuilder sum = new StringBuilder();
+        m.topics().values().stream().filter(t -> !t.name().startsWith("__")).forEach(t -> {
+            sum.append(sum.isEmpty() ? "" : " · ").append(t.name());
+            t.partitions().forEach(p -> sum.append(" p").append(p.partition()).append("→b").append(p.leader()));
+        });
+        traffic.recordMetadataFetch(client, m.version(), m.controllerId(), sum.toString());
         return m;
     }
 

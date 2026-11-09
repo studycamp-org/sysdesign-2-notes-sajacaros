@@ -29,6 +29,24 @@ public class Traffic {
     }
 
     private final Map<Key, Counter> counters = new HashMap<>();
+    /** 누가 언제 GET /metadata 로 지도를 받아 갔나 (선출 과정 재생에서 "생산자가 지도를 받음" 단계로 쓴다). 최근 50건 */
+    private final Deque<Map<String, Object>> metaFetches = new ArrayDeque<>();
+
+    public synchronized void recordMetadataFetch(String client, long version, int controllerId, String summary) {
+        if (client == null) return;
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("client", client);
+        m.put("at", System.currentTimeMillis());
+        m.put("version", version);
+        m.put("controllerId", controllerId);
+        m.put("summary", summary);
+        metaFetches.addLast(m);
+        while (metaFetches.size() > 50) metaFetches.removeFirst();
+    }
+
+    public synchronized List<Map<String, Object>> metaFetches() {
+        return new ArrayList<>(metaFetches);
+    }
 
     public synchronized void record(String client, String kind, String topic, int partition, long count, String detail) {
         if (client == null) return;

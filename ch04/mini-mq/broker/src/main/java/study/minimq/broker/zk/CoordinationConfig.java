@@ -9,7 +9,7 @@ import study.minimq.broker.BrokerProperties;
 public class CoordinationConfig {
     @Bean
     public Coordination coordination(BrokerProperties props) {
-        Coordination c = new Coordination(props.brokerId(), props.members().get(props.brokerId()), props.members(), props.zkUrl());
+        Coordination c = new Coordination(props.brokerId(), props.advertisedUrl(), props.zkUrl());
         c.start();
         return c;
     }

@@ -53,6 +53,7 @@ public class AdminApi {
         out.put("replicationDelayMs", replicas.replicationDelayMs());
         out.put("replicas", replicas.states());
         out.put("traffic", traffic.snapshot());
+        out.put("metaFetches", traffic.metaFetches());
         out.put("groups", groups.states());
         out.put("trace", traces.snapshot());
         return out;
@@ -158,6 +159,14 @@ public class AdminApi {
         String url = props.producerUrls().get(name);
         if (url == null) throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND, "없는 생산자");
         return new MiniMqHttp(url).post("/flush", Map.of(), Map.class, Duration.ofSeconds(5));
+    }
+
+    /** 대시보드 버튼: 그 생산자를 켜진 직후 상태로 (지도·버퍼를 버린다). */
+    @PostMapping("/admin/producers/{name}/reset")
+    public Object producerReset(@org.springframework.web.bind.annotation.PathVariable String name) throws IOException {
+        String url = props.producerUrls().get(name);
+        if (url == null) throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND, "없는 생산자");
+        return new MiniMqHttp(url).post("/reset", Map.of(), Map.class, Duration.ofSeconds(5));
     }
 
     /** 생산자가 자기 안에서 일어난 단계(지도·버퍼·라우팅·ACK)를 남긴다. */

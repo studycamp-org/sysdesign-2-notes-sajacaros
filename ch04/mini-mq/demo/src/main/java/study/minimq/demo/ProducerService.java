@@ -50,6 +50,7 @@ class ProducerService {
     private final AtomicLong acked = new AtomicLong();
     private final AtomicLong eventSeq = new AtomicLong();
     private volatile Producer producer;
+    private volatile long producerSince; // 지금 생산자를 만든 시각 (켜짐·초기화). 그 전의 지도 요청은 이 생산자의 것이 아니다
     private ClusterView brokers;
 
     ProducerService(DemoProperties props) {
@@ -63,34 +64,58 @@ class ProducerService {
         brokers = new ClusterView(props.bootstrap());
         // 토픽이 만들어질 때까지 기다렸다가 생산자를 만든다 (요청은 그 전엔 503)
         Thread.ofVirtual().start(() -> {
+            // 토픽 만들기는 관리 작업이다 (kafka-topics.sh 처럼). 생산자 이름이 아닌 admin 으로 요청한다
+            MiniMqHttp.setClientId("admin-" + props.name());
             try {
                 Startup.createTopic(props.bootstrap(), new TopicInfo(props.topic(), props.topicPartitions(),
                         props.replicationFactor(), props.minInsyncReplicas()));
             } catch (InterruptedException e) {
                 return;
             }
-            Producer p = new Producer(new Producer.Config(props.bootstrap(), props.batchSize(), props.lingerMs(), props.acksValue(), 5));
-            p.setListener(new Producer.Listener() {
-                @Override
-                public void buffered(String key, TopicPartition tp, int partitions, int batchSizeNow) {
-                    event(key, "buffered", "🧺 " + name + " 버퍼: hash(key) % " + partitions + " = 파티션 " + tp.partition()
-                            + " → " + tp.topic() + "-" + tp.partition() + " 묶음에 담음 (" + batchSizeNow + "/" + props.batchSize()
-                            + "건, " + (props.lingerMs() > 0 ? props.batchSize() + "건이 차거나 " + props.lingerMs() / 1000 + "초가 지나면 보냄)"
-                            : props.batchSize() + "건이 차면 보냄)"));
-                }
-
-                @Override
-                public void dispatched(TopicPartition tp, List<String> keys, int leaderId, long version, int attempt) {
-                    for (String key : keys) {
-                        event(key, "dispatched", "🧭 " + name + " 라우팅: 지도 v" + version + " 에서 " + tp.topic() + "-" + tp.partition()
-                                + " 의 리더 broker-" + leaderId + " 를 찾아 묶음 " + keys.size() + "건을 한 번에 보냄"
-                                + (attempt > 0 ? " (재시도 " + attempt + ")" : ""));
-                    }
-                }
-            });
-            producer = p;
+            MiniMqHttp.setClientId(name);
+            producer = newProducer();
             log.info("{} 준비: {} 로 보냄, acks={}, 묶음 {}건 또는 {}ms", name, props.topic(), props.acks(), props.batchSize(), props.lingerMs());
         });
+    }
+
+    /** 지도도 버퍼도 없는 새 생산자 (켜진 직후 상태). */
+    private Producer newProducer() {
+        producerSince = System.currentTimeMillis();
+        // 생산자는 지도 없이 시작한다. 처음 send() 할 때 GET /metadata 로 받는다 (실제 Kafka 와 같다)
+        Producer p = new Producer(new Producer.Config(props.bootstrap(), props.batchSize(), props.lingerMs(), props.acksValue(), 5));
+        p.setListener(new Producer.Listener() {
+            @Override
+            public void buffered(String key, TopicPartition tp, int partitions, int batchSizeNow) {
+                event(key, "buffered", "🧺 " + name + " 버퍼: hash(key) % " + partitions + " = 파티션 " + tp.partition()
+                        + " → " + tp.topic() + "-" + tp.partition() + " 묶음에 담음 (" + batchSizeNow + "/" + props.batchSize()
+                        + "건, " + (props.lingerMs() > 0 ? props.batchSize() + "건이 차거나 " + props.lingerMs() / 1000 + "초가 지나면 보냄)"
+                        : props.batchSize() + "건이 차면 보냄)"));
+            }
+
+            @Override
+            public void dispatched(TopicPartition tp, List<String> keys, int leaderId, long version, int attempt) {
+                for (String key : keys) {
+                    event(key, "dispatched", "🧭 " + name + " 라우팅: 지도 v" + version + " 에서 " + tp.topic() + "-" + tp.partition()
+                            + " 의 리더 broker-" + leaderId + " 를 찾아 묶음 " + keys.size() + "건을 한 번에 보냄"
+                            + (attempt > 0 ? " (재시도 " + attempt + ")" : ""));
+                }
+            }
+        });
+        return p;
+    }
+
+    /** 대시보드 버튼 "초기화": 지도·버퍼·카운터를 버리고 켜진 직후로 되돌린다. 버퍼에 있던 메시지는 버린다. */
+    @PostMapping("/reset")
+    public synchronized Map<String, Object> reset() {
+        Producer old = producer;
+        if (old == null) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "토픽을 준비하는 중");
+        int dropped = old.buffered().stream().mapToInt(b -> b.keys().size()).sum();
+        producer = newProducer();
+        old.close();
+        sent.set(0);
+        acked.set(0);
+        log.info("{} 초기화: 지도와 버퍼({}건)를 버림", name, dropped);
+        return Map.of("producer", name, "dropped", dropped);
     }
 
     /** 대시보드 버튼: count 건을 보낸다. 버퍼에 담길 뿐, 실제 전송은 묶음이 차거나 시간이 지나야 일어난다. */
@@ -98,14 +123,15 @@ class ProducerService {
     public Map<String, Object> send(@RequestParam(defaultValue = "1") int count) throws IOException {
         Producer p = producer;
         if (p == null) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "토픽을 준비하는 중");
-        ClusterMetadata m = p.view().metadata();
+        boolean had = p.view().cached() != null;
+        ClusterMetadata m = p.view().metadata(); // 지도가 없으면 여기서 처음 받는다
         List<String> ids = new ArrayList<>();
         for (int i = 0; i < Math.max(1, Math.min(count, 50)); i++) {
             String id = "trace-" + Long.toString(System.nanoTime() % 2_000_000_000L, 36);
             ids.add(id);
             long t0 = System.currentTimeMillis();
-            event(id, "map", "🗺 " + name + " 가 캐시한 지도: 메타데이터 v" + m.version() + " — 컨트롤러 broker-" + m.controllerId()
-                    + " 가 그려 과반에 복제한 사본 분산 계획. 메시지는 컨트롤러를 거치지 않는다");
+            event(id, "map", "🗺 " + name + (had ? " 가 캐시한 지도" : " 는 지도가 없어 부트스트랩 브로커에서 처음 받음 (GET /metadata)") + ": 메타데이터 v" + m.version() + " — 컨트롤러 broker-" + m.controllerId()
+                    + " 가 조정 서비스 /metadata 에 써 둔 사본 분산 계획. 메시지는 컨트롤러를 거치지 않는다");
             sent.incrementAndGet();
             p.send(props.topic(), id, "from " + name).whenComplete((offset, e) -> {
                 if (e == null) {
@@ -152,7 +178,13 @@ class ProducerService {
             return out;
         }
         out.put("ready", true);
-        ClusterMetadata m = p.view().metadata();
+        out.put("since", producerSince);
+        ClusterMetadata m = p.view().cached(); // 대시보드가 묻는다고 지도를 받으러 가지 않는다
+        if (m == null) {
+            out.put("leaders", Map.of());
+            out.put("buffer", p.buffered());
+            return out;
+        }
         out.put("metadataVersion", m.version());
         out.put("controllerId", m.controllerId());
         Map<Integer, Integer> leaders = new TreeMap<>();

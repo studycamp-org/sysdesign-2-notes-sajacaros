@@ -41,6 +41,13 @@ public record ClusterMetadata(
         return new ClusterMetadata(version, term, id, epoch, brokers, topics, settings);
     }
 
+    /** 브로커를 지도에 넣거나 주소를 고친다 (조정 서비스 /brokers/{id} 에 등록된 주소). */
+    public ClusterMetadata withBroker(int id, String url, boolean alive) {
+        Map<Integer, BrokerInfo> b = new TreeMap<>(brokers);
+        b.put(id, new BrokerInfo(id, url, alive));
+        return new ClusterMetadata(version, term, controllerId, controllerEpoch, b, topics, settings);
+    }
+
     public ClusterMetadata withBrokerAlive(int id, boolean alive) {
         Map<Integer, BrokerInfo> b = new TreeMap<>(brokers);
         BrokerInfo old = b.get(id);

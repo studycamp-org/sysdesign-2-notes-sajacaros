@@ -28,7 +28,10 @@ public final class ClusterView {
 
     public synchronized ClusterMetadata refresh() throws IOException {
         IOException last = new IOException("부트스트랩 브로커가 없다");
-        for (String b : bootstraps) {
+        // 아무 브로커에나 묻는다: 시작 위치를 무작위로 (늘 첫 번째에만 몰리지 않게). 안 되면 다음 브로커
+        int start = java.util.concurrent.ThreadLocalRandom.current().nextInt(bootstraps.size());
+        for (int i = 0; i < bootstraps.size(); i++) {
+            String b = bootstraps.get((start + i) % bootstraps.size());
             try {
                 meta = http(b).get("/metadata", new TypeReference<ClusterMetadata>() {}, Duration.ofSeconds(2));
                 return meta;
@@ -42,6 +45,11 @@ public final class ClusterView {
     public ClusterMetadata metadata() throws IOException {
         ClusterMetadata m = meta;
         return m != null ? m : refresh();
+    }
+
+    /** 받아 둔 지도. 아직 없으면 null (받으러 가지 않는다). */
+    public ClusterMetadata cached() {
+        return meta;
     }
 
     public void invalidate() {

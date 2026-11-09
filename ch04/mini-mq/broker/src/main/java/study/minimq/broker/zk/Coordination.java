@@ -48,7 +48,8 @@ public final class Coordination {
 
     private final int id;
     private final String myUrl;
-    private final Map<Integer, String> members;
+    /** 조정 서비스 /brokers/{id} 에 등록된 브로커와 그 주소 (= 지금 세션이 살아 있는 브로커). 감시로 갱신 */
+    private volatile Map<Integer, String> registered = Map.of();
     private final ZkClient zk;
     private final List<Consumer<ClusterMetadata>> listeners = new CopyOnWriteArrayList<>();
     private final ExecutorService writer = Executors.newSingleThreadExecutor(r -> new Thread(r, "zk-writer"));
@@ -67,12 +68,11 @@ public final class Coordination {
     private volatile boolean isolated;
     private volatile long zxid;
 
-    public Coordination(int id, String myUrl, Map<Integer, String> members, String zkUrl) {
+    public Coordination(int id, String myUrl, String zkUrl) {
         this.id = id;
         this.myUrl = myUrl;
-        this.members = new TreeMap<>(members);
         this.zk = new ZkClient(zkUrl, "broker-" + id);
-        this.committed = ClusterMetadata.initial(members);
+        this.committed = ClusterMetadata.initial(Map.of()); // 지도를 읽기 전엔 아무 브로커도 모른다
     }
 
     public void start() {
@@ -145,9 +145,17 @@ public final class Coordination {
     }
 
     private void sync() throws IOException {
-        Set<Integer> l = new TreeSet<>();
-        for (String c : zk.children(BROKERS)) l.add(Integer.parseInt(c));
-        live = l;
+        // 서비스 탐색: /brokers 아래 임시 노드 = 살아 있는 브로커, 노드 내용 = 그 브로커의 주소
+        Map<Integer, String> reg = new TreeMap<>();
+        for (String c : zk.children(BROKERS)) {
+            try {
+                reg.put(Integer.parseInt(c), zk.get(BROKERS + "/" + c).data());
+            } catch (ZkClient.ZkError e) {
+                // 읽는 사이 사라졌다 (세션 만료)
+            }
+        }
+        registered = reg;
+        live = new TreeSet<>(reg.keySet());
 
         Integer cid = null;
         long epoch = 0;
@@ -196,7 +204,8 @@ public final class Coordination {
             controllerSince = System.currentTimeMillis();
             event("controller_won", "/controller 를 먼저 만들었다 → 컨트롤러 (epoch " + c.czxid() + ")");
             try {
-                zk.create(METADATA, Json.MAPPER.writeValueAsString(ClusterMetadata.initial(members)), null);
+                // 첫 지도: 지금 /brokers 에 등록된 브로커들로. 늦게 등록하는 브로커는 컨트롤러가 이어서 넣는다
+                zk.create(METADATA, Json.MAPPER.writeValueAsString(ClusterMetadata.initial(registered)), null);
             } catch (ZkClient.ZkError ignored) {
                 // 이미 있다
             }
@@ -329,7 +338,7 @@ public final class Coordination {
 
     public String leaderUrl() {
         Integer c = controllerId;
-        return c == null ? null : members.get(c);
+        return c == null ? null : members().get(c);
     }
 
     /** 조정 서비스에 등록돼 있는(세션이 살아 있는) 브로커. */
@@ -346,8 +355,21 @@ public final class Coordination {
         return id;
     }
 
+    /** 조정 서비스에 등록된 브로커와 주소. */
+    public Map<Integer, String> registered() {
+        return registered;
+    }
+
+    /**
+     * 알고 있는 모든 브로커의 주소: 지도에 있는 브로커(죽은 것 포함) + 지금 등록된 브로커.
+     * 대시보드가 모든 브로커에 물을 때와 컨트롤러 주소를 찾을 때 쓴다. 고정 목록은 없다.
+     */
     public Map<Integer, String> members() {
-        return members;
+        Map<Integer, String> m = new TreeMap<>();
+        committed.brokers().values().forEach(b -> m.put(b.id(), b.url()));
+        m.putAll(registered);
+        m.putIfAbsent(id, myUrl);
+        return m;
     }
 
     public void setIsolated(boolean on) {

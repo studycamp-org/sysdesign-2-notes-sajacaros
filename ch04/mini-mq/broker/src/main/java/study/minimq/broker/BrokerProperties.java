@@ -9,7 +9,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 /**
  * @param producers       대시보드가 다룰 생산자 "producer-logs=http://producer-logs:8080,..." (대시보드용)
  * @param zkUrl           조정 서비스(ZooKeeper-lite) 주소
- * @param peers           클러스터 구성원 "1=http://broker-1:8080,2=..." (나 포함). 고정 멤버십
+ * @param advertisedUrl   다른 브로커·클라이언트가 나를 찾아올 주소 (카프카 advertised.listeners).
+ *                        조정 서비스의 /brokers/{id} 에 등록하고, 컨트롤러가 이걸 모아 지도를 만든다
  * @param segmentBytes    활성 세그먼트가 이 크기를 넘으면 새 세그먼트를 연다
  * @param retentionMs     보관 기간. 교재는 2주, 데모는 짧게 잡아 세그먼트가 지워지는 걸 본다
  * @param flushEveryWrite true 면 쓸 때마다 fsync. false 면 OS 페이지 캐시에 맡긴다(교재 기본)
@@ -24,7 +25,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 public record BrokerProperties(
         @DefaultValue("1") int brokerId,
         @DefaultValue("http://localhost:8090") String zkUrl,
-        @DefaultValue("1=http://localhost:8080") String peers,
+        @DefaultValue("http://localhost:8080") String advertisedUrl,
         @DefaultValue("") String producers,
         @DefaultValue("./data") String dataDir,
         @DefaultValue("1048576") long segmentBytes,
@@ -43,16 +44,6 @@ public record BrokerProperties(
             String[] kv = part.trim().split("=", 2);
             if (kv.length == 2) m.put(kv[0].trim(), kv[1].trim());
         }
-        return m;
-    }
-
-    public Map<Integer, String> members() {
-        Map<Integer, String> m = new TreeMap<>();
-        for (String part : peers.split(",")) {
-            String[] kv = part.trim().split("=", 2);
-            if (kv.length == 2) m.put(Integer.parseInt(kv[0].trim()), kv[1].trim());
-        }
-        if (!m.containsKey(brokerId)) throw new IllegalStateException("peers 에 나(broker-" + brokerId + ")가 없다: " + peers);
         return m;
     }
 }

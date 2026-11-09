@@ -1,6 +1,5 @@
 # 브로커 3대 + 조정 서비스 ZooKeeper-lite 1대 (교재 그림 4.8·4.22: 브로커 등록·컨트롤러 선출·메타데이터)
-#   producer-logs   → logs   (ACK=1,   최소 ISR 1) → 소비자 그룹 search  × 3
-#   producer-orders → orders (ACK=all, 최소 ISR 2) → 소비자 그룹 payment × 4 (1명 놀기)
+#   producer-logs   → logs   (ACK=1,   최소 ISR 1) → 소비자 그룹 search × 3, analytics × 2 (한 토픽을 두 그룹이 각자 다 받음)
 #   생산자는 대시보드 버튼을 누를 때만 보낸다
 #   대시보드  http://localhost:8081  (8082, 8083 도 같은 화면)
 name: mini-mq
@@ -13,11 +12,11 @@ x-broker: &broker
 
 x-broker-env: &broker-env
   MINIMQ_ZK_URL: http://zookeeper:8080     # 조정 서비스. 세션 박동이 4초 끊기면 그 브로커의 임시 노드가 지워진다
-  MINIMQ_PEERS: "1=http://broker-1:8080,2=http://broker-2:8080,3=http://broker-3:8080"
+  # 브로커 목록은 설정에 없다: 각자 MINIMQ_ADVERTISED_URL 을 /brokers/{id} 에 등록하고, 컨트롤러가 그걸로 지도를 만든다
   MINIMQ_DATA_DIR: /data
   MINIMQ_SEGMENT_BYTES: "262144"   # 256KB 마다 새 세그먼트 (금방 쌓이는 걸 보려고)
   MINIMQ_RETENTION_MS: "300000"    # 보관 5분 (교재는 2주)
-  MINIMQ_PRODUCERS: "producer-logs=http://producer-logs:8080,producer-orders=http://producer-orders:8080"
+  MINIMQ_PRODUCERS: "producer-logs=http://producer-logs:8080"
   MINIMQ_REPLICA_LAG_TIME_MS: "4000"        # 4초 동안 안 가져가면 ISR 에서 뺀다
   MINIMQ_REPLICA_LAG_MAX_MESSAGES: "1000"   # 1000건 넘게 뒤처져도 뺀다
 
@@ -46,21 +45,21 @@ services:
 
   broker-1:
     <<: *broker
-    environment: { <<: *broker-env, MINIMQ_BROKER_ID: "1" }
+    environment: { <<: *broker-env, MINIMQ_BROKER_ID: "1", MINIMQ_ADVERTISED_URL: "http://broker-1:8080" }
     ports: ["8081:8080"]
     volumes: [broker-1:/data]
   broker-2:
     <<: *broker
-    environment: { <<: *broker-env, MINIMQ_BROKER_ID: "2" }
+    environment: { <<: *broker-env, MINIMQ_BROKER_ID: "2", MINIMQ_ADVERTISED_URL: "http://broker-2:8080" }
     ports: ["8082:8080"]
     volumes: [broker-2:/data]
   broker-3:
     <<: *broker
-    environment: { <<: *broker-env, MINIMQ_BROKER_ID: "3" }
+    environment: { <<: *broker-env, MINIMQ_BROKER_ID: "3", MINIMQ_ADVERTISED_URL: "http://broker-3:8080" }
     ports: ["8083:8080"]
     volumes: [broker-3:/data]
 
-  # 생산자 2개 = 토픽 2개. 자동으로 보내지 않고 대시보드 버튼을 받을 때만 보낸다.
+  # 생산자 1개 = 토픽 1개 (logs). 자동으로 보내지 않고 대시보드 버튼을 받을 때만 보낸다.
   # 버퍼: 파티션별 묶음이 5건이 차면 리더에게 한 번에 보낸다 (시간으로는 안 보냄. 덜 찬 묶음은 대시보드 "지금 보내기")
   producer-logs:
     <<: *demo
@@ -71,28 +70,13 @@ services:
       DEMO_BOOTSTRAP: *bootstrap
       DEMO_NAME: logs
       DEMO_TOPIC: logs
-      DEMO_TOPIC_PARTITIONS: "3"
+      DEMO_TOPIC_PARTITIONS: "5"
       DEMO_ACKS: "1"
       DEMO_MIN_INSYNC_REPLICAS: "1"
       DEMO_BATCH_SIZE: "5"
       DEMO_LINGER_MS: "0"
 
-  producer-orders:
-    <<: *demo
-    environment:
-      <<: *demo-env
-      SPRING_MAIN_WEB_APPLICATION_TYPE: servlet
-      DEMO_ROLE: producer
-      DEMO_BOOTSTRAP: *bootstrap
-      DEMO_NAME: orders
-      DEMO_TOPIC: orders
-      DEMO_TOPIC_PARTITIONS: "3"
-      DEMO_ACKS: all
-      DEMO_MIN_INSYNC_REPLICAS: "2"
-      DEMO_BATCH_SIZE: "5"
-      DEMO_LINGER_MS: "0"
-
-  # 소비자 그룹 search 3명 → logs 파티션 3개를 1개씩
+  # 소비자 그룹 search 3명 → logs 파티션 5개를 2·2·1 개씩
   # 처리 후 커밋(최소 한 번). gap 이 생기면 = ACK 를 받았는데 사라진 메시지
   # 늘리고 줄이기: docker compose up -d --scale consumer-logs=4
   consumer-logs:
@@ -106,16 +90,17 @@ services:
       DEMO_GROUP: search
       DEMO_COMMIT_MODE: after
 
-  # payment 그룹에 4명인데 파티션은 3개 → 1명은 논다 (교재 그림 4.7)
-  consumer-orders:
+  # 소비자 그룹 analytics 2명 → 같은 logs 를 search 와 따로 처음부터 끝까지 받는다 (발행-구독, 교재 그림 4.7)
+  # 그룹마다 오프셋이 따로라 서로 영향이 없다. 파티션 5개를 2명이 3·2 개씩 나눠 맡는다
+  consumer-analytics:
     <<: *demo
-    deploy: { replicas: 4 }
+    deploy: { replicas: 2 }
     environment:
       <<: *demo-env
       DEMO_ROLE: consumer
       DEMO_BOOTSTRAP: *bootstrap
-      DEMO_TOPIC: orders
-      DEMO_GROUP: payment
+      DEMO_TOPIC: logs
+      DEMO_GROUP: analytics
       DEMO_COMMIT_MODE: after
 
   # 1단계 실험(처리 도중 죽음 → 최대 한 번이면 gap, 최소 한 번이면 dup)을 다시 보려면

@@ -68,7 +68,10 @@ public class Controller {
     private static TopicMetadata plan(TopicInfo req, ClusterMetadata m) {
         List<Integer> alive = m.brokers().values().stream()
                 .filter(BrokerInfo::alive).map(BrokerInfo::id).sorted().toList();
-        int rf = Math.min(req.replicationFactor() > 0 ? req.replicationFactor() : 3, alive.size());
+        int rf = req.replicationFactor() > 0 ? req.replicationFactor() : 3;
+        // 카프카처럼: 살아 있는 브로커가 사본 수보다 적으면 만들지 않는다 (막 기동해 아직 등록 전일 수 있다 → 생성 측이 다시 시도)
+        if (alive.size() < rf) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                "INVALID_REPLICATION_FACTOR: 살아 있는 브로커 " + alive.size() + "대 < 사본 " + rf);
         int minIsr = Math.min(req.minInsyncReplicas() > 0 ? req.minInsyncReplicas() : 1, rf);
         List<PartitionMetadata> parts = new ArrayList<>();
         for (int p = 0; p < req.partitions(); p++) {
@@ -132,6 +135,13 @@ public class Controller {
         if (!coord.isLeader()) return;
         ClusterMetadata m = coord.accepted();
         if (m.controllerId() != props.brokerId()) return; // 컨트롤러 기록이 메타데이터에 반영되기 전
+        // 새로 /brokers/{id} 에 등록한 브로커(또는 주소가 바뀐 브로커)를 지도에 넣는다 (카프카: 컨트롤러가 /brokers/ids 를 감시)
+        coord.registered().forEach((id, url) -> {
+            BrokerInfo known = m.brokers().get(id);
+            if (known != null && url.equals(known.url())) return;
+            coord.note("broker-" + id + " 가 /brokers/" + id + " 에 등록함 (주소 " + url + ") → 지도에 " + (known == null ? "추가" : "주소 고침"));
+            coord.propose(x -> x.brokers().containsKey(id) && url.equals(x.brokers().get(id).url()) ? x : x.withBroker(id, url, true));
+        });
         java.util.Set<Integer> live = coord.liveBrokers();
         boolean grace = coord.controllerAgeMs() < 5000; // 막 컨트롤러가 됐을 땐 다른 브로커가 아직 등록 전일 수 있다
         for (BrokerInfo b : m.brokers().values()) {
