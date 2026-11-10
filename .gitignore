@@ -5,3 +5,6 @@
 .venv/
 __pycache__/
 ch04/images/
+
+# humanize-korean 스킬 작업 폴더
+_workspace/
