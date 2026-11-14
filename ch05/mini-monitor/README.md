@@ -58,6 +58,10 @@ docker compose down      # 끝. DB·Kafka 는 메모리(tmpfs)에만 있어서 �
 | Grafana | http://localhost:3000/d/mini-monitor | Datadog 식 대시보드: 개요 숫자, 호스트 맵, 시스템 지표, 수집 방식, 다운샘플링 비교, 청크, 경보·알림 |
 | TimescaleDB | `psql postgresql://postgres:postgres@localhost:5432/metrics` | 직접 SQL |
 
+## 시연
+
+`시연_시나리오.md` (약 2분 15초) · 영상 `media/시연_전체흐름.mp4` · 다시 찍기 `node media/record.cjs <출력 폴더>`
+
 ## 해 볼 것
 
 1. **장애 넣기** — 파이프라인 뷰 호스트 맵에서 칸을 누르고 버튼을 누른다.
