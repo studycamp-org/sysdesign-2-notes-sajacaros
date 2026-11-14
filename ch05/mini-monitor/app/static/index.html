@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mini-monitor</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1><b>●</b> mini-monitor</h1>
+  <nav class="tabs"><a href="/" class="on">파이프라인</a><a href="/hosts">호스트 맵</a><a href="/alerts">경보<span class="cnt" id="firingCnt" hidden></span></a><a href="/slo">SLO</a></nav>
+  <div class="kpis" id="kpis"></div>
+  <a class="btn" id="grafana" target="_blank">Grafana 대시보드 ↗</a>
+</header>
+<main>
+  <section>
+    <h2>파이프라인 <small>그림 22</small></h2>
+    <div class="flow" id="flow"></div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const fmt = (n, d = 0) => n == null || isNaN(n) ? "–" : Number(n).toLocaleString("ko-KR", { maximumFractionDigits: d, minimumFractionDigits: d });
+const bytes = (b) => b == null ? "–" : b > 1e9 ? fmt(b / 1e9, 2) + " GB" : b > 1e6 ? fmt(b / 1e6, 1) + " MB" : fmt(b / 1e3, 0) + " KB";
+const PALETTE = ["#8a5cf6", "#58a6ff", "#3fb950", "#e3b341", "#f0883e", "#db61a2", "#39c5cf", "#a5d6ff"];
+let S = null, scaling = {};
+
+function cpuColor(v) {
+  const stops = [[0, [63, 185, 80]], [40, [184, 212, 63]], [65, [227, 179, 65]], [80, [240, 136, 62]], [92, [248, 81, 73]]];
+  let a = stops[0], b = stops[stops.length - 1];
+  for (let i = 0; i < stops.length - 1; i++) if (v >= stops[i][0] && v <= stops[i + 1][0]) { a = stops[i]; b = stops[i + 1]; }
+  const t = b[0] === a[0] ? 0 : Math.min(1, Math.max(0, (v - a[0]) / (b[0] - a[0])));
+  return `rgb(${a[1].map((x, i) => Math.round(x + (b[1][i] - x) * t)).join(",")})`;
+}
+const byRole = (r) => (S.components || []).filter((c) => c.role === r);
+const sum = (arr, f) => arr.reduce((s, x) => s + (f(x) || 0), 0);
+
+async function control(name, action, extra = {}) {
+  await fetch("/api/control", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, action, ...extra }) });
+  tick();
+}
+
+async function scaleGroup(service, group, delta) {
+  const key = `${service}/${group}`;
+  scaling[key] = 1;
+  render();
+  try {
+    const r = await (await fetch("/api/scale", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ service, group, delta }) })).json();
+    if (r.error) alert("조절 실패: " + r.error);
+  } finally { delete scaling[key]; tick(); }
+}
+
+// 에이전트 한 대 = 한 행. 이벤트(🔥💧💀)는 시뮬레이터 /control, ⏻ 는 컨테이너 강제 종료(docker kill)
+const EVENTS = [["spike", "🔥", 60], ["leak", "💧", 40], ["down", "💀", 45]];
+async function agentCmd(name, action) {
+  await fetch("/api/agent", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, action }) });
+  tick();
+}
+const svcSeen = {};  // 종료·제거된 에이전트도 마지막으로 본 service 그룹에 남겨 둔다
+function agentList(service, registered) {
+  const dk = S.docker || {}, names = dk[`${service}:names`], stopped = dk[`${service}:stopped`] || [];
+  const reg = Object.fromEntries(registered.map((x) => [x.name, x]));
+  const all = [...new Set([...(names || []), ...stopped, ...registered.map((x) => x.name)])]
+    .sort((a, b) => Number(a.split("-").pop()) - Number(b.split("-").pop()));
+  if (!all.length) return `<div class="agents"><span class="dim">없음</span></div>`;
+  const stop = "event.stopPropagation();";
+  registered.forEach((x) => { if (x.meta?.service) svcSeen[x.name] = x.meta.service; });
+  const groups = { api: [], db: [], web: [] };
+  for (const n of all) (groups[svcSeen[n] || "?"] ||= []).push(n);
+  const order = Object.keys(groups).sort((a, b) => (a === "?") - (b === "?") || a.localeCompare(b));
+  const live = (g) => groups[g].filter((n) => names?.includes(n)).length;
+  const head = (g) => {
+    if (g === "?") return `<div class="agrp">미등록 <span class="dim">(${groups[g].length})</span></div>`;
+    const key = `${service}/${g}`, busy = key in scaling, on = dk.enabled;
+    return `<div class="agrp"><span>service:${esc(g)} <span class="dim">(${live(g)})</span></span>${on ? `<span class="acts">
+      <button ${busy || !live(g) ? "disabled" : ""} onclick="scaleGroup('${service}','${g}',-1)">−</button>
+      <button ${busy || (dk[service] ?? 0) >= dk.max ? "disabled" : ""} onclick="scaleGroup('${service}','${g}',1)">+</button></span>` : ""}</div>`;
+  };
+  return `<div class="agents">${order.map((g) => head(g) + groups[g].map((n) => {
+    const r = reg[n], st = r?.stats || {}, cpu = st.last?.cpu_usage, short = n.replace(/^sim-/, "");
+    const dead = stopped.includes(n), gone = names && !names.includes(n) && !dead;
+    if (dead || (gone && !r)) return `<div class="agent dead"><span class="dot"></span><span class="nm">${short}</span><span></span>
+      <span class="stt">종료됨</span><span class="acts"><button title="다시 켜기" onclick="${stop}agentCmd('${n}','start')">▶</button></span></div>`;
+    if (!r) return `<div class="agent booting"><span class="dot"></span><span class="nm">${short}</span><span></span><span class="stt">기동 중</span><span></span></div>`;
+    if (gone) return `<div class="agent gone"><span class="dot"></span><span class="nm">${short}</span><span></span><span class="stt">제거됨</span><span></span></div>`;
+    const ev = st.state && st.state !== "normal" ? st.state : null;
+    return `<div class="agent ${ev === "down" ? "down" : ""}" title="${esc(n)}">
+      <span class="dot" style="background:${cpu == null ? "#555" : cpuColor(cpu)}"></span><span class="nm">${short}</span>
+      <span>${ev === "down" ? "" : fmt(cpu) + "%"}</span><span class="stt">${ev ? `${ev} ${st.state_left}s` : ""}</span>
+      <span class="acts">${EVENTS.map(([a, ic, sec]) => `<button class="${ev === a ? "on" : ""}" title="${ev === a ? "정상으로" : a + " " + sec + "초"}"
+        onclick="${stop}control('${n}','${ev === a ? "normal" : a}',{seconds:${ev === a ? 0 : sec}})">${ic}</button>`).join("")}
+        <button class="kill" title="강제 종료 (docker kill)" onclick="${stop}agentCmd('${n}','kill')">⏻</button></span></div>`;
+  }).join("")).join("")}</div>`;
+}
+
+function renderKpis() {
+  const sims = byRole("sim"), db = S.db || {};
+  const ingest = Array.isArray(db.ingest) ? sum(db.ingest, (r) => r.n) / 10 : null;
+  const firing = Array.isArray(db.alerts) ? db.alerts.filter((a) => a.state === "firing").length : 0;
+  const comp = Array.isArray(db.compression) ? db.compression[0] : null;
+  const ratio = comp && comp.after ? comp.before / comp.after : null;
+  const down = sims.filter((s) => s.stats && s.stats.state === "down").length;
+  const k = [
+    [fmt(sims.length - down) + " / " + fmt(sims.length), "호스트 (정상/전체)"],
+    [fmt(ingest, 1), "DB 적재 점/초"],
+    [Array.isArray(db.series) ? fmt(db.series[0].count) : "–", "활성 시계열"],
+    [fmt(S.kafka?.metrics?.lag), "Kafka lag"],
+    [fmt(firing), "firing 경보"],
+    [Array.isArray(db.size) ? bytes(db.size[0].hypertable_size) : "–", "하이퍼테이블 크기"],
+    [ratio ? fmt(ratio, 1) + "×" : "아직", "압축률"],
+  ];
+  $("kpis").innerHTML = k.map(([v, l], i) => `<div class="kpi"><div class="v" style="${i === 4 && firing ? "color:var(--bad)" : i === 3 && S.kafka?.metrics?.lag > 500 ? "color:var(--warn)" : ""}">${v}</div><div class="l">${l}</div></div>`).join("");
+}
+
+function renderFlow() {
+  // 숫자 입력 중이면 1초 갱신이 입력을 덮지 않게 이번 그리기를 건너뛴다
+  if (document.activeElement?.dataset?.editing) return;
+  const sims = byRole("sim"), push = sims.filter((s) => s.meta?.mode === "push"), pull = sims.filter((s) => s.meta?.mode === "pull");
+  const cols = [...byRole("collector-push"), ...byRole("collector-pull")];
+  const writers = byRole("writer"), alerter = byRole("alerter")[0];
+  const db = S.db || {}, km = S.kafka?.metrics, ka = S.kafka?.alerts;
+  const collected = sum(cols, (c) => c.stats?.rate);
+  const written = sum(writers, (w) => w.stats?.rate);
+  const anyPaused = writers.some((w) => w.stats?.paused);
+  const ingest = Array.isArray(db.ingest) ? db.ingest : [];
+  const via = (v) => (ingest.find((r) => r.via === v)?.n || 0) / 10;
+  const buffered = sum(push, (s) => s.stats?.buffered);
+
+  const stage1 = `<h3>① 지표 출처</h3><div class="big">${sims.length}대</div>
+    <div class="sub">push ${push.length} · pull ${pull.length}</div>
+    <div class="card"><div class="t">push <span class="badge b-push">PUSH</span></div>
+      <div class="d">버퍼 ${fmt(buffered)}줄</div>${agentList("sim-push", push)}</div>
+    <div class="card"><div class="t">pull <span class="badge b-pull">PULL</span></div>
+      <div class="d">수집기가 당겨 감</div>${agentList("sim-pull", pull)}</div>
+`;
+
+  const rc = ringColors();
+  const colCard = (c) => {
+    const st = c.stats;
+    if (!st) return `<div class="card dead"><div class="t">${esc(c.name)}</div><div class="d">응답 없음</div></div>`;
+    const sw = st.mode === "pull" && rc[c.name] ? `<span style="color:${rc[c.name]}">■</span> ` : "";
+    const extra = st.mode === "pull"
+      ? `담당 ${st.owned.map((o) => esc(o.replace(/^sim-pull-/, "p"))).join(",") || "없음"} · 실패 ${fmt(st.scrape_fail, 1)}/s`
+      : `거절 ${fmt(st.rejected)}`;
+    return `<div class="card"><div class="t"><span>${sw}${esc(c.name)}</span> <span class="badge b-${st.mode}">${st.mode.toUpperCase()}</span></div>
+      <div class="d">${fmt(st.rate, 1)} 점/s · ${extra}</div></div>`;
+  };
+  const stage2 = `<h3>② 수집기</h3><div class="big">${fmt(collected, 1)}<span class="dim" style="font-size:12px"> 점/s</span></div>
+    <div class="sub">push: DNS 라운드로빈</div>${cols.filter((c) => c.role === "collector-push").map(colCard).join("")}
+    <div class="sub" style="margin-top:8px">pull: 해시 링 (그림 11)</div>${cols.filter((c) => c.role === "collector-pull").map(colCard).join("")}
+    ${ringSvg()}`;
+
+  const parts = km ? km.partitions : [];
+  const maxEnd = Math.max(1, ...parts.map((p) => p.end));
+  const stage3 = `<h3>③ Kafka · metrics</h3><div class="big">${fmt(km?.lag)}<span class="dim" style="font-size:12px"> lag</span></div>
+    <div class="sub">파티션 ${parts.length}개 · 키 = 지표 이름</div>
+    ${parts.map((p) => `<div class="part"><span class="dim">p${p.partition}</span>
+      <div class="bar" title="end ${p.end} / committed ${p.committed}"><i style="width:${(p.committed / maxEnd) * 100}%"></i><i class="lag" style="left:${(p.committed / maxEnd) * 100}%;width:${(p.lag / maxEnd) * 100}%"></i></div>
+      <span style="text-align:right">${fmt(p.lag)}</span></div>`).join("")}
+    <div class="d dim" style="margin-top:6px">빨강 = lag</div>`;
+
+  const stage4 = `<h3>④ 소비자 tsdb-writer</h3><div class="big">${fmt(written, 1)}<span class="dim" style="font-size:12px"> 행/s</span></div>
+    <div class="sub">DB 에 쓴 뒤 커밋</div>
+    ${writers.map((w) => {
+      const st = w.stats;
+      if (!st) return `<div class="card dead"><div class="t">${esc(w.name)}</div></div>`;
+      return `<div class="card"><div class="t">${esc(w.name)}
+        <button class="${st.paused ? "on" : ""}" onclick="control('${w.name}','${st.paused ? "resume" : "pause"}')">${st.paused ? "재개" : "DB 장애"}</button></div>
+        <div class="d">p${st.partitions.map((p) => p.partition).join(",p") || "–"} · ${fmt(st.rate, 1)}행/s · 배치 ${st.last_batch.rows}행 ${st.last_batch.ms}ms</div></div>`;
+    }).join("")}`;
+
+  const one = (k, f) => Array.isArray(db[k]) && db[k][0] ? f(db[k][0]) : "–";
+  const comp = Array.isArray(db.compression) ? db.compression[0] : null;
+  const stage5 = `<h3>⑤ TimescaleDB</h3><div class="big">${one("rows", (r) => fmt(r.approximate_row_count))}<span class="dim" style="font-size:12px"> 행</span></div>
+    <div class="sub">push ${fmt(via("push"), 1)} + pull ${fmt(via("pull"), 1)} 점/s</div>
+    <div class="kv">
+      <span>청크(10분)</span><span>${one("chunks", (r) => `${r.total} (압축 ${r.compressed})`)}</span>
+      <span>크기</span><span>${one("size", (r) => bytes(r.hypertable_size))}</span>
+      <span>압축 전→후</span><span>${comp && comp.after ? bytes(comp.before) + "→" + bytes(comp.after) : "15분 뒤부터"}</span>
+      <span>1분 롤업(1h)</span><span>${one("rollup_1m", (r) => fmt(r.count))}</span>
+      <span>1시간 롤업</span><span>${one("rollup_1h", (r) => fmt(r.count))}</span>
+    </div>`;
+
+  const q = byRole("query")[0]?.stats;
+  const tiers = q?.tiers || {}, tierSum = Math.max(1, sum(Object.values(tiers), (x) => x));
+  const stageQ = `<h3>⑥ 질의 서비스</h3><div class="big">${fmt(q?.rate, 1)}<span class="dim" style="font-size:12px"> 질의/s</span></div>
+    <div class="sub">${Object.entries(q?.by_client || {}).map(([c, r]) => `${esc(c)} ${fmt(r, 1)}`).join(" · ") || "아직 질의 없음"}</div>
+    <div class="kv"><span>지연 p50 / p99</span><span>${fmt(q?.p50_ms, 1)} / ${fmt(q?.p99_ms, 1)} ms</span>
+      <span>오류</span><span>${fmt(q?.errors)}</span></div>
+    <div class="d dim" style="margin:6px 0 2px">저장 계층</div>
+    ${["raw", "1m", "1h"].map((t) => `<div class="part"><span class="dim">${t}</span>
+      <div class="bar"><i style="width:${((tiers[t] || 0) / tierSum) * 100}%"></i></div><span style="text-align:right">${fmt(tiers[t] || 0)}</span></div>`).join("")}`;
+
+  const alerts = Array.isArray(db.alerts) ? db.alerts : [];
+  const stage6 = `<h3>⑦ 경보</h3><div class="big" style="${alerts.some((a) => a.state === "firing") ? "color:var(--bad)" : ""}">${alerts.filter((a) => a.state === "firing").length}<span class="dim" style="font-size:12px"> firing</span></div>
+    <div class="sub">pending ${alerts.filter((a) => a.state === "pending").length} · 규칙 ${alerter?.stats?.rules?.length ?? "–"}개 · 평가 ${alerter?.stats?.last_eval?.ms ?? "–"}ms</div>
+    <div class="card"><div class="t">경보 관리자</div><div class="d">질의 서비스 → 병합 → Kafka</div></div>
+    <div class="card"><div class="t">경보 소비자</div><div class="d">alerts lag ${fmt(ka?.lag)}</div></div>
+    <a class="btn" href="/alerts">경보 페이지 →</a> <a class="btn" href="/slo">SLO →</a>`;
+
+  const stages = [stage1, stage2, stage3, stage4, stage5, stageQ, stage6];
+  $("flow").innerHTML = stages.map((h, i) => `<div class="stage ${i === 4 && anyPaused ? "stopped" : ""}">${h}</div>`).join("");
+}
+
+function ringOwners() {
+  const c = byRole("collector-pull").find((x) => x.stats && x.stats.ring?.length);
+  if (!c) return { ring: [], targets: [], peers: [] };
+  const ring = c.stats.ring, peers = c.stats.peers.slice().sort();
+  const targets = c.stats.targets.map((t) => {
+    const o = ring.find((r) => r.pos >= t.pos) || ring[0];
+    return { ...t, owner: o.owner };
+  });
+  return { ring, targets, peers };
+}
+
+function ringColors() {
+  const { peers } = ringOwners();
+  return Object.fromEntries(peers.map((p, i) => [p, PALETTE[i % PALETTE.length]]));
+}
+
+function ringSvg() {
+  const { ring, targets, peers } = ringOwners();
+  if (!peers.length) return "";
+  const color = ringColors();
+  const R = 110, cx = 140, cy = 130, pt = (pos, r) => [cx + r * Math.sin(pos * 2 * Math.PI), cy - r * Math.cos(pos * 2 * Math.PI)];
+  let svg = `<svg viewBox="0 0 280 262" width="100%" style="max-width:260px;display:block;margin:4px auto 0"><circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="#353043" stroke-width="10"/>`;
+  for (let i = 0; i < ring.length; i++) {  // 링 구간을 주인(가상 노드) 색으로
+    const prev = ring[(i - 1 + ring.length) % ring.length].pos, cur = ring[i].pos;
+    const a0 = prev, a1 = cur < prev ? cur + 1 : cur;
+    const [x0, y0] = pt(a0, R), [x1, y1] = pt(a1, R);
+    svg += `<path d="M${x0},${y0} A${R},${R} 0 ${a1 - a0 > 0.5 ? 1 : 0} 1 ${x1},${y1}" stroke="${color[ring[i].owner]}" stroke-width="10" fill="none" opacity=".55"/>`;
+  }
+  for (const t of targets) {
+    const [x, y] = pt(t.pos, R), [tx, ty] = pt(t.pos, R - 24);
+    svg += `<circle cx="${x}" cy="${y}" r="6" fill="${color[t.owner]}" stroke="#fff" stroke-width="1.5"/>`;
+    svg += `<text x="${tx}" y="${ty + 4}" text-anchor="middle" style="font-size:13px">${esc(t.name.replace(/^sim-pull-/, "p"))}</text>`;
+  }
+  return svg + `<text x="${cx}" y="${cy + 4}" text-anchor="middle" style="font-size:12px">가상 노드 ×16</text></svg>`;
+}
+
+function render() {
+  if (!S || !S.ready) { $("flow").innerHTML = `<span class="dim">구성 요소가 뜨기를 기다리는 중… ${esc(S?.error || "")}</span>`; return; }
+  $("grafana").href = S.grafana;
+  renderKpis(); renderFlow();
+  const nf = Array.isArray(S.db?.alerts) ? S.db.alerts.filter((a) => a.state === "firing").length : 0;
+  $("firingCnt").hidden = !nf; $("firingCnt").textContent = nf;
+}
+
+async function tick() {
+  try { S = await (await fetch("/api/state")).json(); } catch (e) { S = { error: String(e) }; }
+  render();
+}
+tick();
+setInterval(tick, 1000);
+</script>
+</body>
+</html>

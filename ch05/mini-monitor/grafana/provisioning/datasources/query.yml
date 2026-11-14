@@ -1,0 +1,15 @@
+apiVersion: 1
+datasources:
+  # 질의 서비스 (app/query.py). Prometheus HTTP API 를 흉내 내므로 기본 Prometheus 데이터소스로 붙는다.
+  # 지표 패널은 모두 여기로 묻는다. TSDB 가 TimescaleDB 라는 사실을 Grafana 는 모른다.
+  - name: 질의 서비스
+    uid: query
+    type: prometheus
+    url: http://query:8080
+    isDefault: true
+    jsonData:
+      httpMethod: POST
+      timeInterval: 5s
+      prometheusType: Prometheus
+      prometheusVersion: 2.40.0
+      cacheLevel: None

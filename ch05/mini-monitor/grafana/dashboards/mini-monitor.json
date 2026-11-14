@@ -1,0 +1,1422 @@
+{
+ "uid": "mini-monitor",
+ "title": "mini-monitor · 지표 모니터링",
+ "tags": [
+  "ch05"
+ ],
+ "timezone": "browser",
+ "refresh": "5s",
+ "schemaVersion": 39,
+ "version": 1,
+ "editable": true,
+ "time": {
+  "from": "now-15m",
+  "to": "now"
+ },
+ "timepicker": {
+  "refresh_intervals": [
+   "5s",
+   "10s",
+   "30s",
+   "1m"
+  ]
+ },
+ "templating": {
+  "list": [
+   {
+    "name": "service",
+    "label": "service",
+    "type": "query",
+    "datasource": {
+     "type": "prometheus",
+     "uid": "query"
+    },
+    "multi": true,
+    "includeAll": true,
+    "allValue": ".*",
+    "current": {
+     "selected": true,
+     "text": [
+      "All"
+     ],
+     "value": [
+      "$__all"
+     ]
+    },
+    "refresh": 2,
+    "query": {
+     "query": "label_values(cpu_usage, service)",
+     "refId": "service"
+    }
+   },
+   {
+    "name": "host",
+    "label": "host (다운샘플링)",
+    "type": "query",
+    "datasource": {
+     "type": "prometheus",
+     "uid": "query"
+    },
+    "multi": false,
+    "includeAll": false,
+    "refresh": 2,
+    "sort": 1,
+    "query": {
+     "query": "label_values(cpu_usage, host)",
+     "refId": "host"
+    }
+   }
+  ]
+ },
+ "panels": [
+  {
+   "type": "row",
+   "title": "개요",
+   "id": 1,
+   "collapsed": false,
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 24,
+    "h": 1
+   },
+   "panels": []
+  },
+  {
+   "type": "stat",
+   "title": "호스트",
+   "description": "최근 20초 안에 cpu_usage 를 보낸 호스트 (질의 서비스)",
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "query"
+     },
+     "expr": "count(last_over_time(cpu_usage{service=~\"$service\"}[20s]))",
+     "legendFormat": "",
+     "editorMode": "code",
+     "range": false,
+     "instant": true
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "values": false,
+     "fields": ""
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value",
+    "justifyMode": "center"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "none",
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "purple",
+        "value": null
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "query"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 1,
+    "w": 4,
+    "h": 4
+   },
+   "id": 2
+  },
+  {
+   "type": "stat",
+   "title": "DB 적재 점/초",
+   "description": "",
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "timescaledb"
+     },
+     "rawQuery": true,
+     "editorMode": "code",
+     "format": "table",
+     "rawSql": "SELECT count(*) / 10.0 FROM metrics WHERE time > now() - interval '10 seconds'"
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "values": false,
+     "fields": ""
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value",
+    "justifyMode": "center"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "none",
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "purple",
+        "value": null
+       }
+      ]
+     },
+     "decimals": 1
+    },
+    "overrides": []
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "timescaledb"
+   },
+   "gridPos": {
+    "x": 4,
+    "y": 1,
+    "w": 4,
+    "h": 4
+   },
+   "id": 3
+  },
+  {
+   "type": "stat",
+   "title": "활성 시계열",
+   "description": "이름 + 레이블 조합. 카디널리티",
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "timescaledb"
+     },
+     "rawQuery": true,
+     "editorMode": "code",
+     "format": "table",
+     "rawSql": "SELECT count(DISTINCT (name, host)) FROM metrics WHERE time > now() - interval '1 minute'"
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "values": false,
+     "fields": ""
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value",
+    "justifyMode": "center"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "none",
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "purple",
+        "value": null
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "timescaledb"
+   },
+   "gridPos": {
+    "x": 8,
+    "y": 1,
+    "w": 4,
+    "h": 4
+   },
+   "id": 4
+  },
+  {
+   "type": "stat",
+   "title": "firing 경보",
+   "description": "",
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "timescaledb"
+     },
+     "rawQuery": true,
+     "editorMode": "code",
+     "format": "table",
+     "rawSql": "SELECT count(*) FROM alerts WHERE state = 'firing'"
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "values": false,
+     "fields": ""
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value",
+    "justifyMode": "center"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "none",
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "red",
+        "value": 1
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "timescaledb"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 1,
+    "w": 4,
+    "h": 4
+   },
+   "id": 5
+  },
+  {
+   "type": "stat",
+   "title": "하이퍼테이블 크기",
+   "description": "",
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "timescaledb"
+     },
+     "rawQuery": true,
+     "editorMode": "code",
+     "format": "table",
+     "rawSql": "SELECT hypertable_size('metrics')"
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "values": false,
+     "fields": ""
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value",
+    "justifyMode": "center"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "bytes",
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "purple",
+        "value": null
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "timescaledb"
+   },
+   "gridPos": {
+    "x": 16,
+    "y": 1,
+    "w": 4,
+    "h": 4
+   },
+   "id": 6
+  },
+  {
+   "type": "stat",
+   "title": "압축률",
+   "description": "압축 전 / 후 바이트. 15분 지난 청크부터 압축된다",
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "timescaledb"
+     },
+     "rawQuery": true,
+     "editorMode": "code",
+     "format": "table",
+     "rawSql": "SELECT coalesce(sum(before_compression_total_bytes)::float\n  / nullif(sum(after_compression_total_bytes), 0), 0)\nFROM chunk_compression_stats('metrics') WHERE compression_status = 'Compressed'"
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "values": false,
+     "fields": ""
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value",
+    "justifyMode": "center"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "x",
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "purple",
+        "value": null
+       }
+      ]
+     },
+     "decimals": 1,
+     "mappings": [
+      {
+       "type": "value",
+       "options": {
+        "0": {
+         "text": "아직",
+         "color": "text"
+        }
+       }
+      }
+     ]
+    },
+    "overrides": []
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "timescaledb"
+   },
+   "gridPos": {
+    "x": 20,
+    "y": 1,
+    "w": 4,
+    "h": 4
+   },
+   "id": 7
+  },
+  {
+   "type": "row",
+   "title": "호스트 맵",
+   "id": 8,
+   "collapsed": false,
+   "gridPos": {
+    "x": 0,
+    "y": 5,
+    "w": 24,
+    "h": 1
+   },
+   "panels": []
+  },
+  {
+   "type": "stat",
+   "title": "호스트 맵 · CPU",
+   "description": "Datadog 호스트 맵처럼 호스트 하나가 칸 하나. 20초 넘게 소식이 없으면 DOWN (-1)",
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "query"
+     },
+     "expr": "last_over_time(cpu_usage{service=~\"$service\"}[20s]) or age_over_time(cpu_usage{service=~\"$service\"}[10m]) * 0 - 1",
+     "legendFormat": "{{host}}",
+     "editorMode": "code",
+     "range": false,
+     "instant": true
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "values": false,
+     "fields": ""
+    },
+    "colorMode": "background",
+    "graphMode": "none",
+    "textMode": "value_and_name",
+    "justifyMode": "center",
+    "wideLayout": false,
+    "text": {
+     "titleSize": 11,
+     "valueSize": 18
+    },
+    "orientation": "vertical",
+    "minVizWidth": 88,
+    "minVizHeight": 64
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "#b8d43f",
+        "value": 50
+       },
+       {
+        "color": "orange",
+        "value": 70
+       },
+       {
+        "color": "red",
+        "value": 90
+       }
+      ]
+     },
+     "decimals": 0,
+     "mappings": [
+      {
+       "type": "value",
+       "options": {
+        "-1": {
+         "text": "DOWN",
+         "color": "#444"
+        }
+       }
+      }
+     ]
+    },
+    "overrides": []
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "query"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 6,
+    "w": 15,
+    "h": 9
+   },
+   "id": 9
+  },
+  {
+   "type": "bargauge",
+   "title": "Top 10 · CPU (30초 평균)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "query"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "query"
+     },
+     "expr": "topk(10, avg_over_time(cpu_usage{service=~\"$service\"}[30s]))",
+     "legendFormat": "{{host}}",
+     "editorMode": "code",
+     "range": false,
+     "instant": true
+    }
+   ],
+   "options": {
+    "orientation": "horizontal",
+    "displayMode": "gradient",
+    "showUnfilled": true,
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "values": false
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "min": 0,
+     "max": 100,
+     "decimals": 0,
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 70
+       },
+       {
+        "color": "red",
+        "value": 90
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "x": 15,
+    "y": 6,
+    "w": 9,
+    "h": 9
+   },
+   "id": 10
+  },
+  {
+   "type": "row",
+   "title": "시스템 지표",
+   "id": 11,
+   "collapsed": false,
+   "gridPos": {
+    "x": 0,
+    "y": 15,
+    "w": 24,
+    "h": 1
+   },
+   "panels": []
+  },
+  {
+   "type": "timeseries",
+   "title": "CPU 사용률 · host",
+   "description": "",
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "query"
+     },
+     "expr": "avg by (host) (cpu_usage{service=~\"$service\"})",
+     "legendFormat": "{{host}}",
+     "editorMode": "code",
+     "range": true,
+     "instant": false
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8,
+      "showPoints": "never",
+      "spanNulls": 15000,
+      "drawStyle": "line",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      }
+     },
+     "color": {
+      "mode": "palette-classic"
+     },
+     "min": 0,
+     "max": 100
+    },
+    "overrides": []
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "query"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 16,
+    "w": 12,
+    "h": 8
+   },
+   "id": 12
+  },
+  {
+   "type": "timeseries",
+   "title": "메모리 사용률 · host",
+   "description": "",
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "query"
+     },
+     "expr": "avg by (host) (mem_usage{service=~\"$service\"})",
+     "legendFormat": "{{host}}",
+     "editorMode": "code",
+     "range": true,
+     "instant": false
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8,
+      "showPoints": "never",
+      "spanNulls": 15000,
+      "drawStyle": "line",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      }
+     },
+     "color": {
+      "mode": "palette-classic"
+     },
+     "min": 0,
+     "max": 100
+    },
+    "overrides": []
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "query"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 16,
+    "w": 12,
+    "h": 8
+   },
+   "id": 13
+  },
+  {
+   "type": "timeseries",
+   "title": "요청 수 · service (합)",
+   "description": "",
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "query"
+     },
+     "expr": "sum by (service) (http_rps{service=~\"$service\"})",
+     "legendFormat": "{{service}}",
+     "editorMode": "code",
+     "range": true,
+     "instant": false
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "reqps",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 25,
+      "showPoints": "never",
+      "spanNulls": 15000,
+      "drawStyle": "line",
+      "stacking": {
+       "mode": "normal",
+       "group": "A"
+      }
+     },
+     "color": {
+      "mode": "palette-classic"
+     }
+    },
+    "overrides": []
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "query"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 24,
+    "w": 8,
+    "h": 8
+   },
+   "id": 14
+  },
+  {
+   "type": "timeseries",
+   "title": "p99 지연 · service",
+   "description": "구간 안에서 host 들의 최댓값",
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "query"
+     },
+     "expr": "max by (service) (max_over_time(http_latency_p99_ms{service=~\"$service\"}[$__interval]))",
+     "legendFormat": "{{service}}",
+     "editorMode": "code",
+     "range": true,
+     "instant": false
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "ms",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8,
+      "showPoints": "never",
+      "spanNulls": 15000,
+      "drawStyle": "line",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      }
+     },
+     "color": {
+      "mode": "palette-classic"
+     }
+    },
+    "overrides": []
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "query"
+   },
+   "gridPos": {
+    "x": 8,
+    "y": 24,
+    "w": 8,
+    "h": 8
+   },
+   "id": 15
+  },
+  {
+   "type": "timeseries",
+   "title": "오류율 · service",
+   "description": "",
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "query"
+     },
+     "expr": "avg by (service) (http_error_rate{service=~\"$service\"})",
+     "legendFormat": "{{service}}",
+     "editorMode": "code",
+     "range": true,
+     "instant": false
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8,
+      "showPoints": "never",
+      "spanNulls": 15000,
+      "drawStyle": "line",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      }
+     },
+     "color": {
+      "mode": "palette-classic"
+     }
+    },
+    "overrides": []
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "query"
+   },
+   "gridPos": {
+    "x": 16,
+    "y": 24,
+    "w": 8,
+    "h": 8
+   },
+   "id": 16
+  },
+  {
+   "type": "row",
+   "title": "수집 파이프라인",
+   "id": 17,
+   "collapsed": false,
+   "gridPos": {
+    "x": 0,
+    "y": 32,
+    "w": 24,
+    "h": 1
+   },
+   "panels": []
+  },
+  {
+   "type": "timeseries",
+   "title": "적재 점/초 · 수집 방식",
+   "description": "push 에이전트가 보낸 것과 pull 수집기가 당겨 온 것. 적재량은 저장소 내부 지표라 TimescaleDB 직접",
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "timescaledb"
+     },
+     "rawQuery": true,
+     "editorMode": "code",
+     "format": "time_series",
+     "rawSql": "SELECT $__timeGroupAlias(time, '10s'), labels->>'via' AS metric, count(*) / 10.0 AS value\nFROM metrics WHERE $__timeFilter(time) GROUP BY 1, 2 ORDER BY 1"
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "none",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 25,
+      "showPoints": "never",
+      "spanNulls": 15000,
+      "drawStyle": "bars",
+      "stacking": {
+       "mode": "normal",
+       "group": "A"
+      }
+     },
+     "color": {
+      "mode": "palette-classic"
+     }
+    },
+    "overrides": []
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "timescaledb"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 33,
+    "w": 8,
+    "h": 8
+   },
+   "id": 18
+  },
+  {
+   "type": "status-history",
+   "title": "up · pull 대상",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "query"
+   },
+   "description": "pull 수집기가 남긴 up. 0 이면 응답 없음 → instance_down",
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "query"
+     },
+     "expr": "min by (host) (min_over_time(up[$__interval]))",
+     "legendFormat": "{{host}}",
+     "editorMode": "code",
+     "range": true,
+     "instant": false
+    }
+   ],
+   "options": {
+    "showValue": "never",
+    "rowHeight": 0.85,
+    "legend": {
+     "showLegend": false
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "green",
+        "value": 1
+       }
+      ]
+     },
+     "mappings": [
+      {
+       "type": "value",
+       "options": {
+        "0": {
+         "text": "DOWN"
+        },
+        "1": {
+         "text": "UP"
+        }
+       }
+      }
+     ]
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "x": 8,
+    "y": 33,
+    "w": 16,
+    "h": 8
+   },
+   "id": 19
+  },
+  {
+   "type": "row",
+   "title": "저장소 (TimescaleDB)",
+   "id": 20,
+   "collapsed": false,
+   "gridPos": {
+    "x": 0,
+    "y": 41,
+    "w": 24,
+    "h": 1
+   },
+   "panels": []
+  },
+  {
+   "type": "timeseries",
+   "title": "다운샘플링 비교 · cpu_usage · $host",
+   "description": "질의 서비스가 step 으로 저장 계층을 고른다: 5초 → 원본, 1분 → metrics_1m, 1시간 → metrics_1h. 평균만 남기면 스파이크가 사라지므로 max 도 남겼다",
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "query"
+     },
+     "expr": "cpu_usage{host=\"$host\"}",
+     "legendFormat": "원본 (5초)",
+     "editorMode": "code",
+     "range": true,
+     "instant": false,
+     "interval": "5s"
+    },
+    {
+     "refId": "B",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "query"
+     },
+     "expr": "avg_over_time(cpu_usage{host=\"$host\"}[1m])",
+     "legendFormat": "1분 avg",
+     "editorMode": "code",
+     "range": true,
+     "instant": false,
+     "interval": "1m"
+    },
+    {
+     "refId": "C",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "query"
+     },
+     "expr": "max_over_time(cpu_usage{host=\"$host\"}[1m])",
+     "legendFormat": "1분 max",
+     "editorMode": "code",
+     "range": true,
+     "instant": false,
+     "interval": "1m"
+    },
+    {
+     "refId": "D",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "query"
+     },
+     "expr": "min_over_time(cpu_usage{host=\"$host\"}[1m])",
+     "legendFormat": "1분 min",
+     "editorMode": "code",
+     "range": true,
+     "instant": false,
+     "interval": "1m"
+    },
+    {
+     "refId": "E",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "query"
+     },
+     "expr": "avg_over_time(cpu_usage{host=\"$host\"}[1h])",
+     "legendFormat": "1시간 avg",
+     "editorMode": "code",
+     "range": true,
+     "instant": false,
+     "interval": "1h"
+    }
+   ],
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8,
+      "showPoints": "never",
+      "spanNulls": 15000,
+      "drawStyle": "line",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      }
+     },
+     "color": {
+      "mode": "palette-classic"
+     }
+    },
+    "overrides": []
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "query"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 42,
+    "w": 14,
+    "h": 9
+   },
+   "id": 21
+  },
+  {
+   "type": "table",
+   "title": "청크",
+   "description": "10분마다 새 청크. 15분 지나면 압축 정책이 컬럼형으로 바꾸고, 6시간 지나면 통째로 지운다",
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "timescaledb"
+     },
+     "rawQuery": true,
+     "editorMode": "code",
+     "format": "table",
+     "rawSql": "SELECT c.chunk_name AS \"청크\", c.range_start AS \"시작\", c.range_end AS \"끝\",\n       CASE WHEN c.is_compressed THEN '압축됨' ELSE '원본' END AS \"상태\",\n       s.total_bytes AS \"크기\"\nFROM timescaledb_information.chunks c\nJOIN chunks_detailed_size('metrics') s ON s.chunk_name = c.chunk_name\nWHERE c.hypertable_name = 'metrics' ORDER BY c.range_start DESC"
+    }
+   ],
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "align": "auto"
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "크기"
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "bytes"
+       }
+      ]
+     }
+    ]
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "timescaledb"
+   },
+   "gridPos": {
+    "x": 14,
+    "y": 42,
+    "w": 10,
+    "h": 9
+   },
+   "id": 22
+  },
+  {
+   "type": "row",
+   "title": "경보",
+   "id": 23,
+   "collapsed": false,
+   "gridPos": {
+    "x": 0,
+    "y": 51,
+    "w": 24,
+    "h": 1
+   },
+   "panels": []
+  },
+  {
+   "type": "table",
+   "title": "경보 저장소",
+   "description": "",
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "timescaledb"
+     },
+     "rawQuery": true,
+     "editorMode": "code",
+     "format": "table",
+     "rawSql": "SELECT state AS \"상태\", rule AS \"규칙\", host AS \"호스트\", severity AS \"심각도\", summary AS \"내용\",\n       fired_at AS \"발생\", updated_at AS \"갱신\"\nFROM alerts WHERE state <> 'inactive'\nORDER BY CASE state WHEN 'firing' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END, updated_at DESC LIMIT 50"
+    }
+   ],
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "align": "auto"
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "상태"
+      },
+      "properties": [
+       {
+        "id": "mappings",
+        "value": [
+         {
+          "type": "value",
+          "options": {
+           "firing": {
+            "color": "red",
+            "index": 0
+           },
+           "pending": {
+            "color": "orange",
+            "index": 1
+           },
+           "resolved": {
+            "color": "green",
+            "index": 2
+           },
+           "inactive": {
+            "color": "text",
+            "index": 3
+           }
+          }
+         }
+        ]
+       },
+       {
+        "id": "custom.cellOptions",
+        "value": {
+         "type": "color-background"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "timescaledb"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 52,
+    "w": 12,
+    "h": 9
+   },
+   "id": 24
+  },
+  {
+   "type": "table",
+   "title": "보낸 알림",
+   "description": "",
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "timescaledb"
+     },
+     "rawQuery": true,
+     "editorMode": "code",
+     "format": "table",
+     "rawSql": "SELECT sent_at AS \"시각\", channel AS \"채널\", message AS \"메시지\"\nFROM notifications ORDER BY id DESC LIMIT 50"
+    }
+   ],
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "align": "auto"
+     }
+    },
+    "overrides": []
+   },
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "timescaledb"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 52,
+    "w": 12,
+    "h": 9
+   },
+   "id": 25
+  }
+ ]
+}

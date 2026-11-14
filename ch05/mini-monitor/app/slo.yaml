@@ -1,0 +1,30 @@
+# SLO (서비스 수준 목표). 교재 5장 범위 밖이지만 지표 모니터링의 대표 활용이라 붙였다.
+# 실무는 보통 30일 창이지만 실습이라 1시간 창으로 줄였다. 모든 SLI 는 질의 서비스(MiniQL)로 계산한다.
+#
+# kind: ratio      expr 가 창({w}) 동안의 SLI(0~1) 하나를 돌려준다
+# kind: threshold  expr 를 1분 단위로 질의해 "좋은 (host, 분)" 비율을 SLI 로 쓴다 (op threshold 를 만족하면 좋음)
+window: 1h
+short_window: 5m
+
+slos:
+  - name: 요청 성공률
+    desc: 오류 아닌 요청 비율
+    kind: ratio
+    target: 0.99
+    expr: >-
+      1 - sum(avg_over_time(http_error_rate[{w}]) / 100 * avg_over_time(http_rps[{w}]))
+      / sum(avg_over_time(http_rps[{w}]))
+
+  - name: 응답 지연
+    desc: "p99 < 400ms 인 (host, 분) 비율"
+    kind: threshold
+    target: 0.95
+    expr: max_over_time(http_latency_p99_ms[1m])
+    op: "<"
+    threshold: 400
+
+  - name: 수집 가용성
+    desc: pull 수집 성공 비율 (up)
+    kind: ratio
+    target: 0.99
+    expr: sum(sum_over_time(up[{w}])) / sum(count_over_time(up[{w}]))

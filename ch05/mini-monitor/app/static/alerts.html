@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mini-monitor · 경보</title>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  .grid2 { display: grid; gap: 14px; grid-template-columns: 3fr 2fr; }
+  @media (max-width: 1100px) { .grid2 { grid-template-columns: 1fr; } }
+  code.expr { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); background: var(--bg); padding: 1px 5px; border-radius: 3px; }
+  .flowline { color: var(--dim); font-size: 12px; margin: 0 0 4px; }
+  .flowline b { color: var(--text); font-weight: 600; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr.firing td { background: rgba(248, 81, 73, .08); }
+</style>
+</head>
+<body>
+<header>
+  <h1><b>●</b> mini-monitor</h1>
+  <nav class="tabs"><a href="/">파이프라인</a><a href="/hosts">호스트 맵</a><a href="/alerts" class="on">경보</a><a href="/slo">SLO</a></nav>
+  <div class="kpis" id="kpis"></div>
+</header>
+<main>
+  <section>
+    <h2>규칙 <small>rules.yaml</small></h2>
+    <div id="rules"></div>
+  </section>
+  <div class="grid2">
+    <section>
+      <h2>경보 저장소 <small>1시간</small></h2>
+      <div id="alerts"></div>
+    </section>
+    <section>
+      <h2>보낸 알림 <small>1시간</small></h2>
+      <div id="chart"></div>
+      <div class="feed" id="feed"></div>
+    </section>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const fmt = (n, d = 0) => n == null || isNaN(n) ? "–" : Number(n).toLocaleString("ko-KR", { maximumFractionDigits: d, minimumFractionDigits: d });
+const tm = (t) => t ? new Date(t).toLocaleTimeString("ko-KR") : "–";
+const ago = (t) => { if (!t) return "–"; const s = Math.max(0, (Date.now() - new Date(t)) / 1000); return s < 60 ? `${fmt(s)}초` : s < 3600 ? `${fmt(s / 60)}분` : `${fmt(s / 3600, 1)}시간`; };
+let A = null;
+
+function render() {
+  if (!A || A.error) { $("alerts").innerHTML = `<span class="dim">${esc(A?.error || "불러오는 중…")}</span>`; return; }
+  const al = A.alerts || [], by = (st) => al.filter((a) => a.state === st);
+  const sent = (A.per_minute || []).reduce((s, r) => s + r.firing + r.resolved, 0);
+  const k = [[by("firing").length, "firing", by("firing").length ? "var(--bad)" : ""], [by("pending").length, "pending", by("pending").length ? "var(--warn)" : ""],
+    [by("resolved").length, "resolved (1시간)", ""], [sent, "보낸 알림 (1시간)", ""], [A.rules?.last_eval?.ms, "평가 시간 ms", ""]];
+  $("kpis").innerHTML = k.map(([v, l, c]) => `<div class="kpi"><div class="v" style="color:${c}">${fmt(v)}</div><div class="l">${l}</div></div>`).join("");
+
+  const rules = A.rules?.rules || [];
+  $("rules").innerHTML = rules.length ? `<table><tr><th>규칙</th><th>심각도</th><th>for</th><th>expr (MiniQL)</th><th>firing</th><th>pending</th></tr>
+    ${rules.map((r) => `<tr><td><b>${esc(r.alert)}</b></td><td><span class="badge b-${r.severity}">${r.severity}</span></td><td>${esc(r.for)}</td>
+      <td><code class="expr">${esc(r.expr)}</code></td>
+      <td class="num">${by("firing").filter((a) => a.rule === r.alert).length || ""}</td><td class="num">${by("pending").filter((a) => a.rule === r.alert).length || ""}</td></tr>`).join("")}</table>`
+    : `<span class="dim">경보 관리자 응답 대기 중…</span>`;
+
+  $("alerts").innerHTML = al.length ? `<table><tr><th>상태</th><th>규칙</th><th>호스트</th><th>심각도</th><th>내용</th><th>지속</th><th>보냄</th><th>갱신</th></tr>
+    ${al.map((r) => `<tr class="${r.state}"><td><span class="badge b-${r.state}">${r.state}</span></td><td>${esc(r.rule)}</td><td>${esc(r.host)}</td>
+      <td><span class="badge b-${r.severity}">${r.severity}</span></td><td>${esc(r.summary)}</td>
+      <td class="dim">${r.state === "firing" ? ago(r.fired_at) : r.state === "pending" ? ago(r.pending_since) + " 대기" : ""}</td>
+      <td class="dim">${r.notified_state === r.state ? "✓" : r.state === "pending" ? "" : "…"}</td><td class="dim">${tm(r.updated_at)}</td></tr>`).join("")}</table>`
+    : `<span class="dim">경보 없음</span>`;
+
+  const pm = A.per_minute || [], max = Math.max(1, ...pm.map((r) => r.firing + r.resolved));
+  const W = 560, H = 70, now = Date.now(), x = (t) => W - ((now - new Date(t)) / 3600e3) * W, bw = W / 60 - 2;
+  $("chart").innerHTML = `<svg viewBox="0 0 ${W} ${H + 14}" width="100%" style="margin-bottom:8px">
+    <line x1="0" y1="${H}" x2="${W}" y2="${H}" stroke="#353043"/>
+    ${pm.map((r) => { const hf = (r.firing / max) * H, hr = (r.resolved / max) * H, xx = x(r.t) - bw;
+      return `<rect x="${xx}" y="${H - hf}" width="${bw}" height="${hf}" fill="#f85149"/><rect x="${xx}" y="${H - hf - hr}" width="${bw}" height="${hr}" fill="#3fb950"/>`; }).join("")}
+    <text x="0" y="${H + 12}">-60분</text><text x="${W}" y="${H + 12}" text-anchor="end">지금</text></svg>`;
+  const n = A.notifications || [];
+  $("feed").innerHTML = n.length ? n.map((r) => `<div><time>${tm(r.sent_at)}</time><span class="badge">${esc(r.channel)}</span> ${esc(r.message)}</div>`).join("")
+    : `<span class="dim">알림 없음</span>`;
+}
+
+async function tick() {
+  try { A = await (await fetch("/api/alerts")).json(); } catch (e) { A = { error: String(e) }; }
+  render();
+}
+tick();
+setInterval(tick, 2000);
+</script>
+</body>
+</html>
