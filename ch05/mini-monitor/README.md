@@ -60,7 +60,7 @@ docker compose down      # 끝. DB·Kafka 는 메모리(tmpfs)에만 있어서 �
 
 ## 시연
 
-`시연_시나리오.md` (약 2분 15초) · 영상 `media/시연_전체흐름.mp4` · 다시 찍기 `node media/record.cjs <출력 폴더>`
+`시연_시나리오.md` (약 2분 15초) · 영상 `media/ch05.mp4` · 다시 찍기 `node media/record.cjs <출력 폴더>`
 
 ## 해 볼 것
 
