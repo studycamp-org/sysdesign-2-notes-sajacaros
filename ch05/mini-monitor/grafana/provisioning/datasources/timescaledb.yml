@@ -1,0 +1,17 @@
+apiVersion: 1
+# 지표는 질의 서비스로 묻는다. 이 데이터소스는 저장소 내부(청크·압축·적재량)와 경보 저장소를 볼 때만 쓴다.
+datasources:
+  - name: TimescaleDB
+    uid: timescaledb
+    type: grafana-postgresql-datasource
+    url: timescaledb:5432
+    user: postgres
+    isDefault: false
+    jsonData:
+      database: metrics
+      sslmode: disable
+      timescaledb: true
+      postgresVersion: 1600
+      timeInterval: 5s
+    secureJsonData:
+      password: postgres

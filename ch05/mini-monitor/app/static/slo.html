@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mini-monitor · SLO</title>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  .slos { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+  .slo .top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .slo .name { font-size: 15px; font-weight: 600; }
+  .slo .sli { font-size: 32px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .slo .tgt { color: var(--dim); }
+  .budget { height: 12px; background: var(--line); border-radius: 6px; overflow: hidden; margin: 6px 0 2px; }
+  .budget i { display: block; height: 100%; }
+  .st { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 4px; }
+  .st-정상 { background: #2c4a33; } .st-빠르게 { background: var(--warn); color: #000; } .st-위반 { background: var(--bad); } .st-데이터 { background: var(--line); }
+  code.expr { display: block; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg); padding: 5px 7px; border-radius: 4px; margin-top: 8px; color: var(--text); white-space: pre-wrap; word-break: break-all; }
+  .help { color: var(--dim); font-size: 12px; line-height: 1.6; }
+  .help b { color: var(--text); }
+  .chaos { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .chaos label { color: var(--dim); font-size: 12px; display: flex; gap: 6px; align-items: center; }
+  .chaos select { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 4px; font: inherit; padding: 2px 4px; }
+  .chaos button.go { background: var(--bad); border-color: var(--bad); font-weight: 600; }
+  .sick { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+  .sick span { font-size: 10px; padding: 1px 6px; border-radius: 3px; background: var(--line); }
+  .sick span.spike { background: var(--bad); } .sick span.leak { background: #1d3d5c; } .sick span.down { background: #3a3340; color: var(--bad); }
+</style>
+</head>
+<body>
+<header>
+  <h1><b>●</b> mini-monitor</h1>
+  <nav class="tabs"><a href="/">파이프라인</a><a href="/hosts">호스트 맵</a><a href="/alerts">경보</a><a href="/slo" class="on">SLO</a></nav>
+  <div class="kpis" id="kpis"></div>
+</header>
+<main>
+  <section>
+    <h2>장애 주입 </h2>
+    <div class="chaos">
+      <label>장애 <select id="cAction">
+        <option value="spike">🔥 스파이크</option>
+        <option value="down">💀 다운</option>
+        <option value="leak">💧 누수</option></select></label>
+      <label>대상 <select id="cMode"><option value="all">전체</option><option value="push">push 만</option><option value="pull">pull 만</option></select></label>
+      <label>비율 <select id="cPct"><option>10</option><option>25</option><option selected>50</option><option>100</option></select>%</label>
+      <label>기간 <select id="cSec"><option value="60">1분</option><option value="180">3분</option><option value="300" selected>5분</option><option value="600">10분</option></select></label>
+      <button class="go" onclick="chaos()">장애 넣기</button>
+      <button onclick="chaos('normal')">모두 정상으로</button>
+      <span class="dim" id="cMsg"></span>
+    </div>
+    <div class="sick" id="sick"></div>
+  </section>
+  <div class="slos" id="slos"></div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const fmt = (n, d = 0) => n == null || isNaN(n) ? "–" : Number(n).toLocaleString("ko-KR", { maximumFractionDigits: d, minimumFractionDigits: d });
+const pct = (x, d = 2) => x == null ? "–" : fmt(x * 100, d) + "%";
+let O = null;
+
+function spark(points, target) {
+  const W = 320, H = 70;
+  if (!points.length) return `<div class="dim" style="height:${H}px">아직 데이터 없음</div>`;
+  const lo = Math.min(target - (1 - target), ...points.map((p) => p[1])), hi = 1;
+  const t0 = points[0][0], t1 = Math.max(t0 + 1, points[points.length - 1][0]);
+  const x = (t) => ((t - t0) / (t1 - t0)) * W, y = (v) => H - ((v - lo) / Math.max(1e-9, hi - lo)) * H;
+  const path = points.map((p, i) => `${i ? "L" : "M"}${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join("");
+  const bad = points.filter((p) => p[1] < target).map((p) => `<circle cx="${x(p[0])}" cy="${y(p[1])}" r="2.5" fill="#f85149"/>`).join("");
+  return `<svg viewBox="0 0 ${W} ${H + 12}" width="100%">
+    <line x1="0" x2="${W}" y1="${y(target)}" y2="${y(target)}" stroke="#e3b341" stroke-dasharray="4 3"/>
+    <text x="${W}" y="${y(target) - 3}" text-anchor="end">목표 ${pct(target, 1)}</text>
+    <path d="${path}" fill="none" stroke="#8a5cf6" stroke-width="1.6"/>${bad}
+    <text x="0" y="${H + 11}">-${esc(O.window)}</text><text x="${W}" y="${H + 11}" text-anchor="end">지금 (1분 단위 SLI)</text></svg>`;
+}
+
+function render() {
+  if (!O || !O.ready) { $("slos").innerHTML = `<span class="dim">SLI 계산 중… ${esc(O?.error || "")}</span>`; return; }
+  const ss = O.slos;
+  $("kpis").innerHTML = [[ss.filter((s) => s.status === "정상").length, "정상", "var(--ok)"], [ss.filter((s) => s.status === "빠르게 소진").length, "빠르게 소진", "var(--warn)"],
+    [ss.filter((s) => s.status === "위반").length, "위반", "var(--bad)"]]
+    .map(([v, l, c]) => `<div class="kpi"><div class="v" style="color:${v ? c : ""}">${v}</div><div class="l">${l}</div></div>`).join("");
+  $("slos").innerHTML = ss.map((s) => {
+    const rem = s.budget_remaining, w = rem == null ? 0 : Math.max(0, Math.min(1, rem)) * 100;
+    const color = rem == null ? "var(--line)" : rem < 0 ? "var(--bad)" : rem < 0.3 ? "var(--warn)" : "var(--ok)";
+    const expr = s.kind === "threshold" ? `${s.expr} ${s.op} ${s.threshold}   (1분마다, 좋은 비율)` : s.expr;
+    return `<section class="slo"><div class="top"><span class="name">${esc(s.name)}</span><span class="st st-${esc(s.status.split(" ")[0])}">${esc(s.status)}</span></div>
+      <div class="dim" style="margin-bottom:6px">${esc(s.desc)}</div>
+      <div class="top"><span class="sli" style="color:${s.sli != null && s.sli < s.target ? "var(--bad)" : ""}">${pct(s.sli)}</span>
+        <span class="tgt">목표 ${pct(s.target, 1)} · ${esc(O.window)}</span></div>
+      <div class="dim" style="margin-top:6px">오류 예산 남음 <b style="color:${color}">${rem == null ? "–" : pct(rem, 0)}</b></div>
+      <div class="budget"><i style="width:${w}%;background:${color}"></i></div>
+      <div class="kv" style="margin:8px 0">
+        <span>소진율 ${esc(O.short_window)}</span><span style="color:${(s.burn_short || 0) >= 2 ? "var(--warn)" : ""}">${fmt(s.burn_short, 2)}×</span>
+        <span>소진율 ${esc(O.window)}</span><span>${fmt(s.burn_long, 2)}×</span>
+        <span>SLI ${esc(O.short_window)}</span><span>${pct(s.sli_short)}</span>
+      </div>
+      ${spark(s.spark, s.target)}
+      <code class="expr">${esc(expr)}</code></section>`;
+  }).join("");
+}
+
+async function chaos(action) {
+  const body = action === "normal" ? { action: "normal" }
+    : { action: $("cAction").value, mode: $("cMode").value, percent: Number($("cPct").value), seconds: Number($("cSec").value) };
+  const r = await (await fetch("/api/chaos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json();
+  $("cMsg").textContent = r.error ? r.error : action === "normal" ? `${r.ok}대 정상으로` : `${r.ok}대에 ${r.action} ${r.seconds / 60}분`;
+  sick();
+}
+
+async function sick() {
+  try {
+    const st = await (await fetch("/api/state")).json();
+    const bad = (st.components || []).filter((c) => c.role === "sim" && c.stats && c.stats.state !== "normal");
+    const all = (st.components || []).filter((c) => c.role === "sim").length;
+    $("sick").innerHTML = bad.length ? `<span class="dim" style="background:none">장애 중 ${bad.length}/${all}대:</span>` +
+      bad.map((c) => `<span class="${esc(c.stats.state)}">${esc(c.name)} ${esc(c.stats.state)} ${c.stats.state_left}s</span>`).join("")
+      : `<span class="dim" style="background:none">장애 중인 호스트 없음 (${all}대 정상)</span>`;
+  } catch (e) { /* 무시 */ }
+}
+
+async function tick() {
+  try { O = await (await fetch("/api/slo")).json(); } catch (e) { O = { error: String(e) }; }
+  render();
+}
+sick();
+setInterval(sick, 2000);
+tick();
+setInterval(tick, 5000);
+</script>
+</body>
+</html>

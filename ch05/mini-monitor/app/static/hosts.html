@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mini-monitor · 호스트 맵</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1><b>●</b> mini-monitor</h1>
+  <nav class="tabs"><a href="/">파이프라인</a><a href="/hosts" class="on">호스트 맵</a><a href="/alerts">경보</a><a href="/slo">SLO</a></nav>
+  <div class="kpis" id="kpis"></div>
+</header>
+<main>
+  <section>
+    <h2>호스트 맵 (시뮬레이터) <small>질의 서비스 · 칸 클릭 → 상세</small></h2>
+    <div class="groups" id="hostmap"></div>
+    <div class="legend">CPU 0% <span class="grad"></span> 100%</div>
+    <div class="detail" id="detail"><span class="dim">호스트를 고르세요.</span></div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const fmt = (n, d = 0) => n == null || isNaN(n) ? "–" : Number(n).toLocaleString("ko-KR", { maximumFractionDigits: d, minimumFractionDigits: d });
+const bytes = (b) => b == null ? "–" : b > 1e9 ? fmt(b / 1e9, 2) + " GB" : b > 1e6 ? fmt(b / 1e6, 1) + " MB" : fmt(b / 1e3, 0) + " KB";
+const PALETTE = ["#8a5cf6", "#58a6ff", "#3fb950", "#e3b341", "#f0883e", "#db61a2", "#39c5cf", "#a5d6ff"];
+let H = null, selected = null;
+
+function cpuColor(v) {
+  const stops = [[0, [63, 185, 80]], [40, [184, 212, 63]], [65, [227, 179, 65]], [80, [240, 136, 62]], [92, [248, 81, 73]]];
+  let a = stops[0], b = stops[stops.length - 1];
+  for (let i = 0; i < stops.length - 1; i++) if (v >= stops[i][0] && v <= stops[i + 1][0]) { a = stops[i]; b = stops[i + 1]; }
+  const t = b[0] === a[0] ? 0 : Math.min(1, Math.max(0, (v - a[0]) / (b[0] - a[0])));
+  return `rgb(${a[1].map((x, i) => Math.round(x + (b[1][i] - x) * t)).join(",")})`;
+}
+
+// 호스트 맵은 질의 서비스로 읽은 저장된 지표만 쓴다. 20초 넘게 새 점이 없으면 DOWN
+function render() {
+  if (!H || H.error) { $("hostmap").innerHTML = `<span class="dim">불러오는 중… ${esc(H?.error || "")}</span>`; return; }
+  const hosts = H.hosts, isDown = (h) => h.age > H.stale_after;
+  const down = hosts.filter(isDown).length, hot = hosts.filter((h) => !isDown(h) && (h.metrics.cpu_usage ?? 0) >= 90).length;
+  $("kpis").innerHTML = [[hosts.length - down + " / " + hosts.length, "정상 / 전체", ""], [hot, "CPU 90%+", hot ? "var(--bad)" : ""], [down, "DOWN", down ? "var(--bad)" : ""]]
+    .map(([v, l, c]) => `<div class="kpi"><div class="v" style="color:${c}">${v}</div><div class="l">${l}</div></div>`).join("");
+
+  const groups = {};
+  for (const h of hosts) (groups[h.labels.service || "?"] ||= []).push(h);
+  $("hostmap").innerHTML = Object.keys(groups).sort().map((g) => `<div class="group"><h4>service:${esc(g)} <span class="dim">(${groups[g].length})</span></h4><div class="tiles">
+    ${groups[g].map((h) => {
+      const cpu = h.metrics.cpu_usage, down = isDown(h);
+      return `<div class="tile ${down ? "down" : ""} ${selected === h.host ? "sel" : ""}" style="background:${cpu == null ? "#555" : cpuColor(cpu)}" onclick="selected='${h.host}';render()"
+        title="${esc(h.host)}"><span class="m">${h.labels.via === "pull" ? "PULL" : "PUSH"}</span>
+        <span class="n">${esc(h.host.replace(/^sim-/, ""))}</span><span class="c">${down ? "DOWN" : cpu == null ? "…" : fmt(cpu) + "%"}</span></div>`;
+    }).join("")}</div></div>`).join("") || `<span class="dim">최근 10분 동안 지표를 보낸 호스트가 없습니다.</span>`;
+
+  const h = hosts.find((x) => x.host === selected);
+  if (!h) { $("detail").innerHTML = `<span class="dim">호스트를 고르세요.</span>`; return; }
+  const m = h.metrics, hDown = isDown(h);
+  $("detail").innerHTML = `<div class="t" style="display:flex;gap:8px;align-items:center"><b>${esc(h.host)}</b>
+      <span class="badge b-${esc(h.labels.via)}">${esc((h.labels.via || "").toUpperCase())}</span>
+      <span class="dim">${esc(Object.entries(h.labels).filter(([k]) => k !== "via").map(([k, v]) => k + ":" + v).join(" "))}</span></div>
+    <div class="dim" style="margin:4px 0">마지막 수신 <b style="color:${hDown ? "var(--bad)" : "var(--ok)"}">${fmt(h.age)}초 전</b>${hDown ? " · DOWN" : ""}</div>
+    <div class="kv" style="max-width:420px">
+      <span>cpu_usage</span><span>${fmt(m.cpu_usage, 1)} %</span><span>mem_usage</span><span>${fmt(m.mem_usage, 1)} %</span>
+      <span>disk_usage</span><span>${fmt(m.disk_usage, 1)} %</span><span>http_rps</span><span>${fmt(m.http_rps, 1)}</span>
+      <span>http_latency_p99_ms</span><span>${fmt(m.http_latency_p99_ms, 0)}</span><span>http_error_rate</span><span>${fmt(m.http_error_rate, 2)} %</span>
+      ${h.labels.via === "pull" ? `<span>up</span><span>${fmt(m.up)}</span>` : ""}
+    </div>`;
+}
+
+async function tick() {
+  try { H = await (await fetch("/api/hosts")).json(); } catch (e) { H = { error: String(e) }; }
+  render();
+}
+tick();
+setInterval(tick, 2000);
+</script>
+</body>
+</html>

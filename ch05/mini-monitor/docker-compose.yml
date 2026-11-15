@@ -1,0 +1,138 @@
+# ch05 지표 모니터링 실습 (교재 그림 22 를 작게)
+#   시뮬레이터(push/pull) → 수집기 → Kafka(Redpanda) → 소비자 → TimescaleDB → 질의 서비스 → Grafana / 경보
+#   파이프라인 뷰 http://localhost:8000 · Grafana http://localhost:3000
+#   시뮬레이터 수: ./run.sh 6 4  (push 6대, pull 4대)
+name: mini-monitor
+
+x-app: &app
+  build: ./app
+  image: mini-monitor-app
+  restart: unless-stopped
+  environment: &env
+    DISCOVERY_URL: http://discovery:8080
+    KAFKA: redpanda:9092
+    PG_DSN: postgresql://postgres:postgres@timescaledb:5432/metrics
+    COMPOSE_PROJECT: mini-monitor
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:2.17.2-pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: metrics
+    ports: ["5432:5432"]
+    volumes:
+      - ./db/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+      # 데이터는 메모리(tmpfs)에만 둔다. 컨테이너가 멈추면 사라지고 켤 때마다 빈 DB 로 시작한다
+      - { type: tmpfs, target: /var/lib/postgresql/data, tmpfs: { mode: 01777 } }
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d metrics"]
+      interval: 3s
+      retries: 30
+
+  # Kafka 호환 브로커. JVM·ZooKeeper 없이 한 컨테이너로 뜬다
+  redpanda:
+    image: redpandadata/redpanda:v24.2.7
+    restart: unless-stopped
+    command: >-
+      redpanda start --mode dev-container --smp 1 --memory 512M --overprovisioned
+      --kafka-addr PLAINTEXT://0.0.0.0:9092 --advertise-kafka-addr PLAINTEXT://redpanda:9092
+    volumes:  # Kafka 로그도 메모리에만. 켤 때마다 빈 토픽
+      - { type: tmpfs, target: /var/lib/redpanda/data, tmpfs: { mode: 01777 } }
+
+  # 서비스 탐색 (etcd/ZooKeeper 역할)
+  discovery:
+    <<: *app
+    environment: { <<: *env, SERVICE: discovery }
+    command: python discovery.py
+
+  # 지표 출처. 개수는 --scale 로 정한다
+  sim-push:
+    <<: *app
+    command: python simulator.py
+    environment: { <<: *env, SERVICE: sim-push, MODE: push, PUSH_URL: "http://collector-push:8080/write" }
+    depends_on: [discovery, collector-push]
+  sim-pull:
+    <<: *app
+    command: python simulator.py
+    environment: { <<: *env, SERVICE: sim-pull, MODE: pull }
+    depends_on: [discovery]
+
+  # 수집기. push 는 DNS 라운드로빈 뒤 2대, pull 은 해시 링으로 나눠 갖는 2대
+  collector-push:
+    <<: *app
+    command: python collector.py
+    environment: { <<: *env, SERVICE: collector-push, MODE: push }
+    depends_on: [discovery, redpanda]
+    deploy: { replicas: 2 }
+  collector-pull:
+    <<: *app
+    command: python collector.py
+    environment: { <<: *env, SERVICE: collector-pull, MODE: pull }
+    depends_on: [discovery, redpanda]
+    deploy: { replicas: 2 }
+
+  # Kafka → TimescaleDB 소비자 그룹
+  writer:
+    <<: *app
+    environment: { <<: *env, SERVICE: writer }
+    command: python writer.py
+    depends_on:
+      redpanda: { condition: service_started }
+      timescaledb: { condition: service_healthy }
+    deploy: { replicas: 2 }
+
+  # 질의 서비스: TSDB 앞의 얇은 계층. 경보·Grafana 는 여기에만 묻는다 (Prometheus HTTP API 호환)
+  query:
+    <<: *app
+    environment: { <<: *env, SERVICE: query }
+    command: python query.py
+    depends_on:
+      timescaledb: { condition: service_healthy }
+
+  # 경보 관리자 → Kafka alerts → 경보 소비자. 지표는 질의 서비스로, 경보 상태는 경보 저장소(DB)에
+  alerter:
+    <<: *app
+    environment: { <<: *env, SERVICE: alerter, QUERY_URL: "http://query:8080" }
+    command: python alerter.py
+    depends_on:
+      redpanda: { condition: service_started }
+      timescaledb: { condition: service_healthy }
+      query: { condition: service_started }
+  notifier:
+    <<: *app
+    environment: { <<: *env, SERVICE: notifier }
+    command: python notifier.py
+    depends_on:
+      redpanda: { condition: service_started }
+      timescaledb: { condition: service_healthy }
+
+  # 파이프라인 뷰 (직접 만든 화면)
+  pipeline:
+    <<: *app
+    command: python pipeline.py
+    environment: { <<: *env, SERVICE: pipeline, GRAFANA_URL: "http://localhost:3000/d/mini-monitor" }
+    ports: ["8000:8080"]
+    # 화면에서 시뮬레이터 수를 바꾸려고 도커 소켓을 넘긴다 (실습용. 운영에서는 하지 말 것)
+    volumes: ["/var/run/docker.sock:/var/run/docker.sock"]
+    depends_on: [discovery]
+
+  # 시각화 (교재: 직접 만들지 말고 Grafana 같은 기성품)
+  grafana:
+    image: grafana/grafana:11.3.0
+    restart: unless-stopped
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/mini-monitor.json
+      GF_USERS_DEFAULT_THEME: dark
+    ports: ["3000:3000"]
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      timescaledb: { condition: service_healthy }
+      query: { condition: service_started }
+

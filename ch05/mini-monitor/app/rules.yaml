@@ -1,0 +1,37 @@
+# 경보 규칙 (교재 그림 19 의 1번: 디스크의 YAML 설정 파일)
+# expr 는 질의 서비스(app/query.py)에 보내는 MiniQL(PromQL 의 작은 부분집합) 식이다.
+# 비교 연산(> == …)은 조건을 만족하는 시계열만 남긴다. 결과가 host 별로 나오면 그 host 가 "걸린" 것.
+# 그 상태가 for 동안 이어지면 firing. 교재 예시와 같은 모양: expr: up == 0
+
+- alert: high_cpu
+  severity: warning
+  for: 15s
+  expr: avg_over_time(cpu_usage[30s]) > 90
+  summary: "CPU {value:.0f}% (30초 평균)"
+
+- alert: high_latency
+  severity: warning
+  for: 15s
+  expr: avg_over_time(http_latency_p99_ms[30s]) > 400
+  summary: "p99 지연 {value:.0f}ms"
+
+- alert: memory_high
+  severity: warning
+  for: 10s
+  expr: last_over_time(mem_usage[30s]) > 90
+  summary: "메모리 {value:.0f}%"
+
+# pull: 수집기가 당겨 오지 못하면 up=0 을 직접 남긴다 → 죽은 걸 바로 안다
+- alert: instance_down
+  severity: page
+  for: 10s
+  expr: last_over_time(up[30s]) == 0
+  summary: "응답 없음 (up == 0)"
+
+# push: 죽으면 그냥 안 온다 → "마지막 점이 몇 초 전인가" 로 잡는다 (네트워크 문제일 수도 있다)
+# age_over_time 은 질의 서비스의 자체 함수. Prometheus 라면 time() - timestamp(...) 류로 쓴다
+- alert: no_data
+  severity: page
+  for: 0s
+  expr: age_over_time(cpu_usage{via="push"}[10m]) > 20
+  summary: "{value:.0f}초째 지표 없음"
