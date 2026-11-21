@@ -104,7 +104,7 @@ input[type=range] { width:100%; accent-color:var(--accent); }
 .log { font-size:12px; max-height:230px; overflow:auto; }
 .log div { padding:3px 0; border-bottom:1px dashed var(--line); }
 .log .t { font-family:var(--mono); color:var(--soft); margin-right:6px; }
-.log .crash { color:var(--accent); } .log .start { color:var(--ok); } .log .recalc, .log .recon { color:var(--link); }
+.log .crash, .log .error { color:var(--accent); } .log .start, .log .restore, .log .deploy { color:var(--ok); } .log .recalc, .log .recon { color:var(--link); }
 details.guide { margin-top:12px; }
 details.guide summary { cursor:pointer; font-weight:700; }
 .guide ol { padding-left:20px; margin-top:8px; display:grid; gap:6px; font-size:13px; }
@@ -115,7 +115,7 @@ details.guide summary { cursor:pointer; font-weight:700; }
 <div class="wrap">
   <p class="eyebrow">ch06 · 광고 클릭 이벤트 집계</p>
   <h1>광고 클릭 집계 실험실</h1>
-  <p class="sub">휴대폰으로 광고를 누르고, 네트워크와 서버에 문제를 일으켜 보세요. 윈도는 10초(교재 1분을 축소), 시각은 UTC.
+  <p class="sub">휴대폰으로 광고를 누르고, 네트워크와 서버에 문제를 일으켜 보세요. 집계는 Apache Flink, 윈도는 10초(교재 1분을 축소), 시각은 UTC.
     탭을 여러 개 열면 휴대폰이 여러 대가 됩니다.</p>
 
   <details class="guide card">
@@ -126,9 +126,9 @@ details.guide summary { cursor:pointer; font-weight:700; }
       <li><b>워터마크 (그림 13·14)</b> — 워터마크 0초로 두고 2~3초짜리 비행기 모드 → 버려짐(✗). 5초로 올리고 다시 → 잡힘. 대신 윈도 결과가 늦게 나온다</li>
       <li><b>아주 늦은 이벤트 → 재집계 검증 (그림 28)</b> — 비행기 모드로 30초 넘게 → ✗, 장부보다 집계가 모자람 → 🔍 재집계 검증 → 보정</li>
       <li><b>클라이언트 중복</b> — 📶 불안정한 네트워크 켜고 누르기. 응답이 사라져 폰이 재전송(↻) → 같은 click_id 가 두 번 와도 한 번만 센다</li>
-      <li><b>서버 장애 중복·유실 (그림 17~20)</b> — 전략을 고르고 💥 장전 → 광고 누르기. ① 유실(−), ② 중복(+, 점이 ×2), ③ 정확</li>
-      <li><b>스냅숏 (그림 26·27)</b> — ③에서 스냅숏 켜고/끄고 💥. 기록에 '스냅숏에서 복구' vs '처음부터 N건 다시 읽어 복구'</li>
-      <li><b>버그 배포 → 재계산 (그림 11)</b> — 🐞 배포 후 몇 번 누르기 → 집계가 2배(+). 수정 배포 → 🔁 재계산 → 닫힌 윈도가 원본으로 다시 집계된다</li>
+      <li><b>서버 장애 중복·유실 (그림 17~20)</b> — 전략을 고르고 💥 장전 → 광고 누르기. 그 윈도 결과가 나온 직후 Flink TaskManager 가 죽는다. ① 유실(−), ② 중복(+), ③ 정확</li>
+      <li><b>스냅숏 = Flink 체크포인트 (그림 26·27)</b> — ②에서 체크포인트 켜고/끄고 💥. 켜면 마지막 체크포인트 뒤만 다시 읽고, 끄면 배포 시점부터 다시 읽어 이미 낸 결과까지 또 낸다</li>
+      <li><b>버그 배포 → 재계산 (그림 11)</b> — 🐞 배포(세이브포인트로 잡 교체) 후 몇 번 누르기 → 집계가 2배(+). 수정 배포 → 🔁 재계산(같은 SQL 의 유한 잡) → 닫힌 윈도가 원본으로 다시 집계된다. 과거를 몇 초 만에 몰아 읽으면 워터마크가 늦게 올라가서, 실시간에선 버려진 늦은 클릭까지 잡힐 수 있다 (재처리 결과 ≠ 실시간 결과)</li>
     </ol>
   </details>
 
@@ -144,14 +144,14 @@ details.guide summary { cursor:pointer; font-weight:700; }
       <div class="plog" id="plog"></div>
     </div>
     <div class="card">
-      <h2>이벤트 시각 타임라인 <span class="tag">점 = 클릭(누른 시각) · 점선 = 늦게 도착 · 세로 띠 = 10초 윈도</span></h2>
+      <h2>이벤트 시각 타임라인 <span class="tag">점 = 클릭(누른 시각) · 점선 = 늦게 도착 · 세로 띠 = 10초 윈도 · 워터마크 = Flink 윈도 연산자의 실제 값</span></h2>
       <svg id="tl" viewBox="0 0 1000 300" role="img" aria-label="이벤트 시각 타임라인"></svg>
       <div class="legend">
         <span><i style="background:var(--ink)"></i>집계됨</span>
-        <span><i style="background:var(--accent)"></i>두 번 집계됨</span>
+        <span><i style="background:var(--accent)"></i>+ 그 칸이 장부보다 많이 집계됨</span>
         <span><i style="border:2px solid var(--ok);background:transparent"></i>중복 도착 → 한 번만</span>
-        <span style="color:var(--accent)">✗ 늦어서 버림</span>
-        <span><i style="border:1.5px dashed var(--soft);background:transparent"></i>아직 결과 없음 / 유실</span>
+        <span style="color:var(--accent)">✗ 늦어서 버림 (광고 서버가 같은 규칙으로 표시)</span>
+        <span><i style="border:1.5px dashed var(--soft);background:transparent"></i>아직 결과 없음 · <b style="color:var(--accent)">?</b> 빠짐</span>
         <span>굵은 테두리 = 내 폰</span>
       </div>
     </div>
@@ -172,19 +172,19 @@ details.guide summary { cursor:pointer; font-weight:700; }
       <div class="blk">
         <label class="t">전달 보장 전략</label>
         <div class="strat">
-          <label><input type="radio" name="strategy" value="offset_first"><div><b>① 오프셋 먼저 저장</b> <span class="soft">그림 18</span><div class="flow">오프셋 저장 → 💥 → 결과 전송</div></div></label>
-          <label><input type="radio" name="strategy" value="send_then_offset"><div><b>② 결과 전송 후 오프셋 저장</b> <span class="soft">그림 19</span><div class="flow">결과 전송 → 💥 → 오프셋 저장</div></div></label>
-          <label><input type="radio" name="strategy" value="transaction"><div><b>③ 분산 트랜잭션</b> <span class="soft">그림 20</span><div class="flow">[결과 + 스냅숏 + 오프셋] → 💥 → 커밋</div></div></label>
+          <label><input type="radio" name="strategy" value="offset_first"><div><b>① 최대 한 번</b> <span class="soft">NONE · 그림 18</span><div class="flow">체크포인트(소비 위치 저장) → 결과는 버퍼에 → 💥</div></div></label>
+          <label><input type="radio" name="strategy" value="send_then_offset"><div><b>② 최소 한 번</b> <span class="soft">AT_LEAST_ONCE · 그림 19</span><div class="flow">결과 전송 → 💥 → 다음 체크포인트</div></div></label>
+          <label><input type="radio" name="strategy" value="transaction"><div><b>③ 정확히 한 번</b> <span class="soft">EXACTLY_ONCE · 그림 20</span><div class="flow">[결과 트랜잭션 + 체크포인트] → 커밋 (2단계 커밋)</div></div></label>
         </div>
       </div>
       <div class="blk">
-        <div class="toggle" style="border:none;padding:0 0 6px"><div><b>스냅숏</b><small>③에서 열린 윈도 상태를 오프셋과 함께 저장</small></div>
+        <div class="toggle" style="border:none;padding:0 0 6px"><div><b>체크포인트 (스냅숏)</b><small>윈도 상태 + Kafka 오프셋. ③은 항상 켜짐</small></div>
           <label class="sw"><input type="checkbox" id="snapshot"><span></span></label></div>
-        <button class="btn" id="crash"><b>💥 다음 클릭 배치에서 죽이기</b><small>위 흐름의 💥 자리에서 집계 서비스가 죽는다. 장전 후 광고를 누르세요</small></button>
+        <button class="btn" id="crash"><b>💥 다음 윈도 결과 직후 노드 죽이기</b><small>장전 후 광고를 누르면, 그 윈도 결과가 나온 직후 Flink TaskManager 를 강제 종료</small></button>
       </div>
       <div class="blk two">
         <button class="btn" id="bug"></button>
-        <button class="btn" id="recalc"><b>🔁 재계산</b><small>닫힌 윈도를 원본부터 다시</small></button>
+        <button class="btn" id="recalc"><b>🔁 재계산</b><small>같은 SQL 유한 잡으로 원본부터</small></button>
       </div>
       <div class="blk two">
         <button class="btn" id="recon"><b>🔍 재집계 검증</b><small>DuckDB 로 원본과 비교·보정</small></button>
@@ -195,7 +195,7 @@ details.guide summary { cursor:pointer; font-weight:700; }
 
   <div class="row r3">
     <div class="card">
-      <h2>집계 서비스 내부 <span class="tag" id="aggtag"></span></h2>
+      <h2>Flink 집계 잡 <span class="tag" id="aggtag"></span> <a class="tag" href="http://localhost:8081" target="_blank">Flink UI ↗</a></h2>
       <div id="agg" class="small"></div>
       <div id="reconbox" class="small" style="margin-top:10px"></div>
     </div>
@@ -272,15 +272,19 @@ async function post(url, body) {
   const r = await fetch(url, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body || {})});
   return r.json();
 }
-async function setCfg(patch) { CFG = await post("/api/config", patch); renderCfg(); }
+async function setCfg(patch) {
+  const r = await post("/api/config", patch);
+  if (r.error) alert(r.error);
+  CFG = r; renderCfg();
+}
 
 function renderCfg() {
   if (!CFG) return;
   if (document.activeElement !== $("wm")) $("wm").value = CFG.watermark_sec;
   $("wmv").textContent = CFG.watermark_sec + "초";
   document.querySelectorAll("input[name=strategy]").forEach(r => r.checked = r.value === CFG.strategy);
-  $("snapshot").checked = CFG.snapshot;
-  $("snapshot").disabled = CFG.strategy !== "transaction";
+  $("snapshot").checked = CFG.strategy === "transaction" ? true : CFG.snapshot;
+  $("snapshot").disabled = CFG.strategy === "transaction";
   $("bug").innerHTML = CFG.bug ? "<b>✅ 버그 수정 배포</b><small>지금은 버그 버전 (×2)</small>" : "<b>🐞 버그 버전 배포</b><small>클릭을 두 번 세는 버전</small>";
   $("bug").classList.toggle("armed", CFG.bug);
   $("bots").innerHTML = CFG.bots ? "<b>🤖 배경 클릭 끄기</b><small>봇이 3초마다 클릭 중</small>" : "<b>🤖 배경 클릭 켜기</b><small>봇이 3초마다 한 번</small>";
@@ -293,7 +297,8 @@ $("snapshot").addEventListener("change", () => setCfg({snapshot: $("snapshot").c
 $("bug").addEventListener("click", () => setCfg({bug: !CFG.bug}));
 $("bots").addEventListener("click", () => setCfg({bots: !CFG.bots}));
 $("crash").addEventListener("click", async () => {
-  const armed = !(V && V.agg && V.agg.crash_armed);
+  const armed = !(V && V.flink && V.flink.crash_armed);
+  if (armed && V && V.flink && V.flink.busy) return alert(V.flink.busy);
   await post("/api/crash", {arm: armed});
   refresh();
 });
@@ -338,18 +343,21 @@ function renderTimeline() {
     s += `<line x1="${X}" y1="${top - 6}" x2="${X}" y2="${top + laneH * 3}" stroke="${color}" stroke-width="1.5" ${dash ? `stroke-dasharray="${dash}"` : ""}/>`;
     s += `<text x="${X}" y="${top - 10 - dy}" text-anchor="middle" font-size="11" fill="${color}" font-weight="700">${label}</text>`;
   };
-  vline(V.closed_upto, C.soft, "닫힘 경계", 0, "2,2");
-  vline(V.watermark, C.accent, "워터마크", 12, "5,3");
+  vline(V.watermark, C.accent, "Flink 워터마크", 12, "5,3");
   vline(now, C.ink, "지금", 0);
   // 클릭
   for (const c of V.clicks) {
     const y = top + laneH * LANE[c.ad_id] + laneH / 2 + ((parseInt(c.click_id.slice(0, 2), 16) % 5) - 2) * 7;
     const X = x(c.event_ts);
     if (X < L - 5) continue;
-    const recv = c.recv[0], d = c.decisions;
-    const counted = d.filter(v => v === "counted").length + d.filter(v => v === "counted_bug").length * 2;
-    const late = d.includes("late") && counted === 0;
+    const recv = c.recv[0];
+    const cell = V.cells[`${Math.floor(c.event_ts / 10000) * 10000}|${c.ad_id}`] || {};
+    const late = c.verdict === "late";
     const mine = c.phone === PHONE;
+    // 칸(윈도·광고) 단위 결과: 장부와 같으면 집계됨, 많으면 과다(중복·버그), 결과가 확정됐는데 적으면 빠짐
+    const over = cell.settled && cell.event > cell.ledger;
+    const counted = cell.event > 0;
+    const missing = cell.settled && cell.event < cell.ledger && !late;
     if (recv - c.event_ts > 1500) {
       const RX = x(Math.min(recv, t1));
       s += `<path d="M ${X} ${y} Q ${(X + RX) / 2} ${y - 26} ${RX} ${y - 4}" fill="none" stroke="${C.soft}" stroke-dasharray="3,3"/>`;
@@ -358,13 +366,14 @@ function renderTimeline() {
     const sw = mine ? 2.5 : 1.2;
     if (late) {
       s += `<g stroke="${C.accent}" stroke-width="2.5"><line x1="${X - 6}" y1="${y - 6}" x2="${X + 6}" y2="${y + 6}"/><line x1="${X - 6}" y1="${y + 6}" x2="${X + 6}" y2="${y - 6}"/></g>`;
-    } else if (counted === 0) {
-      s += `<circle cx="${X}" cy="${y}" r="6" fill="none" stroke="${C.soft}" stroke-width="${sw}" stroke-dasharray="2,2"/>`;
+    } else if (!counted || missing) {
+      s += `<circle cx="${X}" cy="${y}" r="6" fill="none" stroke="${missing ? C.accent : C.soft}" stroke-width="${sw}" stroke-dasharray="2,2"/>`;
+      if (missing) s += `<text x="${X + 8}" y="${y - 6}" font-size="11" font-weight="700" fill="${C.accent}">?</text>`;
     } else {
-      s += `<circle cx="${X}" cy="${y}" r="6" fill="${counted > 1 ? C.accent : C.ink}" stroke="${mine ? C.accent : C.paper}" stroke-width="${mine ? 2 : 1}"/>`;
-      if (counted > 1) s += `<text x="${X + 8}" y="${y - 6}" font-size="11" font-weight="700" fill="${C.accent}">×${counted}</text>`;
+      s += `<circle cx="${X}" cy="${y}" r="6" fill="${over ? C.accent : C.ink}" stroke="${mine ? C.accent : C.paper}" stroke-width="${mine ? 2 : 1}"/>`;
+      if (over) s += `<text x="${X + 8}" y="${y - 6}" font-size="11" font-weight="700" fill="${C.accent}">+</text>`;
     }
-    if (c.recv.length > 1 || d.includes("dup")) {
+    if (c.recv.length > 1) {
       s += `<circle cx="${X}" cy="${y}" r="10" fill="none" stroke="${C.ok}" stroke-width="1.5"/>`;
       s += `<text x="${X + 11}" y="${y + 12}" font-size="10" fill="${C.ok}">↻${c.recv.length}</text>`;
     }
@@ -378,35 +387,38 @@ function renderWindows() {
   $("wtab").querySelector("tbody").innerHTML = rows.map(w => {
     const st = {open: "열림", waiting: "워터마크 대기", closed: "닫힘"}[w.status];
     let v = '<span class="v-wait">집계 중</span>';
-    if (w.status === "closed") {
+    if (w.status === "closed" && !w.settled) v = '<span class="v-wait">결과 반영 중</span>';
+    if (w.settled) {
       const d = w.event - w.ledger;
       v = d === 0 ? '<span class="v-ok">✓ 일치</span>' : d > 0 ? `<span class="v-bad">+${d} 많음 (중복)</span>` : `<span class="v-bad">${d} 모자람 (누락)</span>`;
     }
     const chips = (w.recon ? `<span class="chip">보정 ${w.recon > 0 ? "+" : ""}${w.recon}</span>` : "") + (w.recalc ? '<span class="chip re">재계산</span>' : "");
-    const procDiff = w.proc !== w.ledger && w.status === "closed";
-    return `<tr class="${w.status === "closed" && w.event !== w.ledger ? "hl" : ""}"><td class="mono">${w.label}</td><td><span class="st ${w.status}">${st}</span></td>
+    const procDiff = w.proc !== w.ledger && w.settled;
+    return `<tr class="${w.settled && w.event !== w.ledger ? "hl" : ""}"><td class="mono">${w.label}</td><td><span class="st ${w.status}">${st}</span></td>
       <td class="num">${w.ledger}</td><td class="num"><b>${w.event}</b>${chips}</td>
       <td class="num ${procDiff ? "soft" : ""}">${w.proc}${procDiff ? " ≠" : ""}</td><td>${v}</td></tr>`;
   }).join("") || '<tr><td colspan="6" class="soft">휴대폰에서 광고를 눌러 보세요</td></tr>';
 }
 
 function renderAgg() {
-  const a = V.agg;
-  $("aggtag").textContent = a.down ? "응답 없음" : `커밋 오프셋 ${a.committed_offset ?? "–"} · lag ${a.lag ?? "–"}`;
-  if (a.down) { $("agg").innerHTML = '<div class="callout">집계 서비스가 응답하지 않는다 — 다시 뜨는 중일 수 있다</div>'; return; }
-  const steps = (a.last_steps || []).map(s => `<span>${esc(s.step)}</span>`).join("<em>→</em>");
-  const r = a.restore || {};
-  const how = {snapshot: "스냅숏에서 복구", replay: `raw-clicks 처음부터 <b>${r.replayed}</b>건 다시 읽어 복구`, empty: "빈 상태로 시작 (커밋된 오프셋부터)"}[r.how] || "";
-  const rc = a.recalc;
+  const f = V.flink || {};
+  const ck = f.checkpoints || {};
+  $("aggtag").textContent = f.job_id ? `잡 ${f.job_id.slice(0, 8)} · ${f.state || "?"}` : "잡 없음";
+  const strat = V.labels[V.config.strategy];
+  const down = f.state && (f.state !== "RUNNING" || f.tasks_running === false);
+  const rc = f.recalc;
   $("agg").innerHTML = `
-    <div>지금 전략: <b>${esc({offset_first: "① 오프셋 먼저", send_then_offset: "② 결과 전송 후 오프셋", transaction: "③ 트랜잭션"}[a.cfg.strategy])}</b>
-      ${a.cfg.strategy === "transaction" ? `· 스냅숏 ${a.cfg.snapshot ? "켬" : "끔"}` : ""} · 워터마크 ${a.cfg.watermark_sec}초 ${a.cfg.bug ? '· <b style="color:var(--accent)">🐞 버그 버전</b>' : ""}
-      ${a.crash_armed ? ' · <b style="color:var(--accent)">💥 장전됨</b>' : ""}</div>
-    <div class="steps"><span style="background:none;padding-left:0">마지막 배치</span>${steps}</div>
-    <div>최신 이벤트 시각 <b class="mono">${a.max_ts ? hms(a.max_ts) : "–"}</b> · 워터마크 <b class="mono">${a.watermark ? hms(a.watermark) : "–"}</b>
-      · 열린 윈도 ${(a.open_windows || []).map(w => hms(w)).join(", ") || "–"}</div>
-    <div class="callout ok">마지막 기동: ${how} · ${r.took_ms ?? "–"}ms${r.open_windows && r.open_windows.length ? ` · 되살린 열린 윈도 ${r.open_windows.join(", ")}` : ""}</div>
-    ${rc ? `<div class="callout">${rc.running ? "🔁 재계산 중…" : `🔁 마지막 재계산: ${hms(Date.parse(rc.bound.replace(" ", "T") + "Z"))} 앞 윈도 · 이벤트 ${rc.events}건 다시 읽음 · 클릭 ${rc.clicks} · ${rc.took_ms}ms`}</div>` : ""}`;
+    ${f.busy ? `<div class="callout">⏳ ${esc(f.busy)} — 세이브포인트를 찍고 잡을 다시 띄우는 중</div>` : ""}
+    ${f.error ? `<div class="callout">⚠ ${esc(f.error)}</div>` : ""}
+    ${down ? `<div class="callout">Flink 가 복구 중이다 (${esc(f.state)}) — TaskManager 를 다시 붙이고 마지막 체크포인트에서 되살리는 중</div>` : ""}
+    <div>전달 보장 <b>${esc(strat)}</b> · 워터마크 ${V.config.watermark_sec}초 ${V.config.bug ? '· <b style="color:var(--accent)">🐞 버그 버전</b>' : ""}
+      ${f.crash_armed ? ' · <b style="color:var(--accent)">💥 장전됨</b>' : ""}</div>
+    <div>Flink 워터마크 <b class="mono">${f.watermark ? hms(f.watermark) : "–"}</b>
+      · 늦어서 버린 레코드(Flink 메트릭) <b>${f.late_dropped ?? "–"}</b></div>
+    <div>체크포인트 완료 <b>${ck.completed ?? "–"}</b>회 · 마지막 #${ck.latest_id ?? "–"} (${ck.latest_age ?? "–"}초 전)
+      ${ck.restored ? ` · 복구에 쓴 체크포인트 #${ck.restored}` : ""}
+      ${V.config.strategy !== "transaction" && !V.config.snapshot ? ' · <b style="color:var(--accent)">체크포인트 끔</b>' : ""}</div>
+    ${rc ? `<div class="callout">🔁 마지막 재계산: ${hms(rc.bound)} 앞 윈도 · ${rc.state} · ${rc.took}초</div>` : ""}`;
   const rcn = V.recon;
   if (rcn && rcn.ran_at) {
     const rows = (rcn.samples || []).map(x => `<tr><td class="mono">${x.window}</td><td>${EMOJI[x.ad_id] || ""} ${x.ad_id}</td><td class="num">${x.truth}</td><td class="num">${x.stream}</td><td class="num">${x.truth - x.stream > 0 ? "+" : ""}${x.truth - x.stream}</td></tr>`).join("");
@@ -433,8 +445,8 @@ async function refresh() {
     V = await (await fetch("/api/view")).json();
     if (!CFG || document.activeElement?.name !== "strategy") { CFG = V.config; renderCfg(); }
     renderTimeline(); renderWindows(); renderAgg(); renderLog();
-    $("crash").classList.toggle("armed", !!V.agg.crash_armed);
-    $("crash").querySelector("b").textContent = V.agg.crash_armed ? "💥 장전됨 — 광고를 누르세요 (다시 누르면 해제)" : "💥 다음 클릭 배치에서 죽이기";
+    $("crash").classList.toggle("armed", !!V.flink.crash_armed);
+    $("crash").querySelector("b").textContent = V.flink.crash_armed ? "💥 장전됨 — 광고를 누르세요 (다시 누르면 해제)" : "💥 다음 윈도 결과 직후 노드 죽이기";
   } catch (e) { /* 다음 주기에 다시 */ }
 }
 renderAds();

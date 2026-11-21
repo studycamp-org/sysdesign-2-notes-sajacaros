@@ -1,7 +1,7 @@
 # ch06 광고 클릭 이벤트 집계 실습 (교재 6장의 문제들을 직접 일으켜 보기)
-#   휴대폰(브라우저) → 광고 서버(api) → clicks.log → Fluent Bit → Kafka raw-clicks → 집계 서비스 → Kafka agg-results → ClickHouse
+#   휴대폰(브라우저) → 광고 서버(api) → clicks.log → Fluent Bit → Kafka raw-clicks → Flink → Kafka agg-results → ClickHouse
 #   raw-clicks → 원본 보관(RustFS, Parquet) → 재집계 검증(DuckDB) → ClickHouse 보정
-#   대시보드(휴대폰·운영자 화면) http://localhost:8006 · ClickHouse http://localhost:8123 · RustFS 콘솔 http://localhost:9001
+#   대시보드(휴대폰·운영자 화면) http://localhost:8006 · Flink UI http://localhost:8081 · ClickHouse http://localhost:8123 · RustFS 콘솔 http://localhost:9001
 name: mini-adclick
 
 x-app: &app
@@ -114,15 +114,51 @@ services:
       kafka-init: { condition: service_completed_successfully }
       api: { condition: service_started }
 
-  # 집계 서비스: 10초 윈도 + 워터마크 + 중복 제거, 전달 보장 전략 3가지, 스냅숏, 재계산
-  aggregator:
-    <<: *app
-    environment: { <<: *env, SERVICE: aggregator }
-    command: python aggregator.py
-    depends_on:
-      kafka-init: { condition: service_completed_successfully }
-      clickhouse: { condition: service_healthy }
-      api: { condition: service_started }
+  # ---- Apache Flink: 집계 서비스 (교재 그림 28 의 Aggregation Service) ----
+  # 잡은 광고 서버(api)가 SQL Gateway 로 제출한다. 체크포인트·세이브포인트는 공유 볼륨에
+  jobmanager:
+    build: ./flink
+    image: mini-adclick-flink
+    restart: unless-stopped
+    command: jobmanager
+    ports: ["8081:8081"]
+    environment: &flinkenv
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: jobmanager
+        rest.address: jobmanager
+        jobmanager.memory.process.size: 1024m
+        taskmanager.memory.process.size: 1536m
+        taskmanager.numberOfTaskSlots: 4
+        parallelism.default: 1
+        execution.checkpointing.dir: file:///flink-data/checkpoints
+        execution.checkpointing.savepoint-dir: file:///flink-data/savepoints
+        execution.checkpointing.externalized-checkpoint-retention: RETAIN_ON_CANCELLATION
+        execution.checkpointing.num-retained: 3
+        restart-strategy.type: fixed-delay
+        restart-strategy.fixed-delay.attempts: 1000
+        restart-strategy.fixed-delay.delay: 2 s
+        heartbeat.interval: 1000
+        heartbeat.timeout: 5000
+        pipeline.auto-watermark-interval: 200 ms
+        table.local-time-zone: UTC
+    volumes: ["flinkdata:/flink-data"]
+
+  # 💥 는 이 컨테이너를 강제로 죽였다 다시 켠다 (집계 노드 장애)
+  taskmanager:
+    image: mini-adclick-flink
+    restart: unless-stopped
+    command: taskmanager
+    environment: *flinkenv
+    volumes: ["flinkdata:/flink-data"]
+    depends_on: [jobmanager]
+
+  sql-gateway:
+    image: mini-adclick-flink
+    restart: unless-stopped
+    command: ["/opt/flink/bin/sql-gateway.sh", "start-foreground",
+              "-Dsql-gateway.endpoint.rest.address=0.0.0.0", "-Drest.address=jobmanager", "-Drest.port=8081"]
+    environment: *flinkenv
+    depends_on: [jobmanager]
 
   # 원본 보관: raw-clicks → Parquet → RustFS (dt=/hour= 파티션)
   archiver:
@@ -148,9 +184,15 @@ services:
     environment: { <<: *env, SERVICE: api }
     command: python api.py
     ports: ["8006:8080"]
-    volumes: ["clicklogs:/logs"]
+    volumes:
+      - clicklogs:/logs
+      # 💥 에서 TaskManager 컨테이너를 죽였다 켜려고 도커 소켓을 넘긴다 (실습용. 운영에서는 하지 말 것)
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
+      kafka-init: { condition: service_completed_successfully }
       clickhouse: { condition: service_healthy }
+      sql-gateway: { condition: service_started }
 
 volumes:
   clicklogs:
+  flinkdata:

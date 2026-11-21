@@ -5,7 +5,7 @@
 2. ClickHouse 의 스트리밍 결과(이벤트 시각, 증가분의 합)를 Parquet 으로 받아 DuckDB 안에서 FULL JOIN 한다.
 3. 다른 칸은 차이만큼 증가분 행(source='recon')을 넣어 맞춘다. 집계 DB 가 '더하기'라 보정도 더하기다.
 
-검증 범위: 최근 30분 ~ 집계 서비스가 닫은 윈도까지 (보관 주기 3초를 넉넉히 빼고).
+검증 범위: 최근 30분 ~ Flink 가 닫은 윈도까지 (보관 주기 3초를 넉넉히 빼고).
 """
 import io
 import threading
@@ -44,7 +44,7 @@ def run(_body: dict) -> dict:
 def _run() -> dict:
     t0 = time.monotonic()
     try:
-        closed = http_json("http://aggregator:8080/stats", timeout=2).get("closed_upto") or 0
+        closed = http_json("http://api:8080/api/closed", timeout=5).get("closed_upto") or 0
     except Exception:  # noqa: BLE001
         closed = 0
     hi = min(closed, now_ms() - 10_000) // WIN * WIN

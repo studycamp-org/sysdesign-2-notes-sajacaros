@@ -6,6 +6,7 @@ cd "$(dirname "$0")"
 docker compose up --build -d --remove-orphans
 echo
 echo "대시보드   : http://localhost:8006"
+echo "Flink UI   : http://localhost:8081"
 echo "ClickHouse : http://localhost:8123/play  (user default / password demo)"
 echo "RustFS 콘솔: http://localhost:9001       (rustfsadmin / rustfsadmin)"
-echo "로그       : docker compose logs -f aggregator recon"
+echo "로그       : docker compose logs -f api recon"
