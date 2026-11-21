@@ -3,7 +3,7 @@
 데이터가 많다는 흉내는 내지 않는다. **사람이 휴대폰(브라우저)으로 광고를 누르고, 네트워크와 서버에 문제를 일으키면**
 6장 3단계의 장치들이 어떻게 대응하는지 클릭 하나 단위로 본다.
 
-구성도: [`../demo-architecture.html`](../demo-architecture.html)
+구성도: [`../architecture.html`](../architecture.html)
 
 ```
  휴대폰(탭) ──HTTP──▶ 광고 서버(api) ──clicks.log──▶ Fluent Bit ──▶ Kafka raw-clicks ──▶ 집계 서비스
