@@ -5,7 +5,7 @@
 
 ```
  sim-push ×N ──push(라인 프로토콜)──▶ collector-push ×2 ─┐            ┌▶ writer ×2 ──▶ TimescaleDB
-   (에이전트·로컬 버퍼)        (DNS 라운드로빈)         ├▶ Redpanda ─┘   (소비자 그룹)   하이퍼테이블·연속 집계
+   (에이전트·로컬 버퍼)        (DNS 라운드로빈)         ├▶ Kafka ────┘   (소비자 그룹)   하이퍼테이블·연속 집계
  sim-pull ×N ◀──pull(/metrics)── collector-pull ×2 ─┘   metrics 토픽                  압축·보관
       │                       (안정 해시 링으로 몫 나눔)    (6 파티션)                     │
       │                                                                                 ▼
@@ -14,7 +14,7 @@
                                                                      ▼            ▼             ▼
                                                                   Grafana   alerter(expr)   SLO 페이지
                                                                                   │
-                                                                     Redpanda alerts ──▶ notifier (채널 전송)
+                                                                        Kafka alerts ──▶ notifier (채널 전송)
 ```
 
 | 교재 | 여기서는 |
@@ -23,7 +23,7 @@
 | pull 모델 + 서비스 탐색 (그림 8~10) | `sim-pull` 이 `/metrics`(Prometheus 형식)를 열고 `discovery` 에 등록. `collector-pull` 이 롱 폴링으로 목록 변경을 통지받는다 |
 | 안정 해시 링 (그림 11) | 수집기마다 가상 노드 16개. 수집기를 늘리거나 죽이면 몫이 다시 나뉜다 |
 | push 모델 + 로드밸런서 (그림 12~13) | `sim-push` 에이전트가 라인 프로토콜로 보낸다. 실패하면 로컬 버퍼에 쌓았다 재전송. LB 대신 도커 DNS 라운드로빈 |
-| Kafka (그림 15~16) | Redpanda (Kafka 호환, JVM 없음). `metrics` 토픽 6 파티션, **지표 이름이 키** |
+| Kafka (그림 15~16) | Apache Kafka 4.1 단일 노드 (KRaft 모드, ZooKeeper 없음). `metrics` 토픽 6 파티션, **지표 이름이 키** |
 | 소비자 → TSDB | `writer` 소비자 그룹. 모아서 한 번에 INSERT 하고 **DB 에 쓴 뒤 커밋** |
 | 시계열 DB | **TimescaleDB** (PostgreSQL 확장). 스키마는 `db/init.sql` |
 | 인코딩·압축 | 15분 지난 청크를 컬럼형 압축 (`segmentby name, host`) |
@@ -104,7 +104,7 @@ docker compose down      # 끝. DB·Kafka 는 메모리(tmpfs)에만 있어서 �
 | discovery | `app/discovery.py` | 등록·박동(TTL 6초)·롱 폴링으로 변경 알림 |
 | sim-push / sim-pull | `app/simulator.py` | 가짜 서버. `/control` 로 spike·leak·down |
 | collector-push / -pull | `app/collector.py` | 받거나 당겨 와서 Kafka 로 |
-| redpanda | (이미지) | Kafka 호환 브로커 |
+| kafka | (이미지 `apache/kafka`) | 메시지 큐 브로커 |
 | writer | `app/writer.py` | Kafka → TimescaleDB, `/control` 로 pause·resume |
 | timescaledb | `db/init.sql` | 하이퍼테이블, 압축·연속 집계·보존 정책, 경보 저장소 |
 | query | `app/query.py` | 질의 서비스. MiniQL 파싱 → SQL, Prometheus API(`/api/v1/query`, `query_range`, `labels`, `series`) |

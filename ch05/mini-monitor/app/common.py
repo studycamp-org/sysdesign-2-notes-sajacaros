@@ -9,7 +9,7 @@ import time
 from aiohttp import ClientSession, ClientTimeout, web
 
 DISCOVERY_URL = os.environ.get("DISCOVERY_URL", "http://discovery:8080")
-KAFKA = os.environ.get("KAFKA", "redpanda:9092")
+KAFKA = os.environ.get("KAFKA", "kafka:9092")
 PG_DSN = os.environ.get("PG_DSN", "postgresql://postgres:postgres@timescaledb:5432/metrics")
 PORT = 8080
 
