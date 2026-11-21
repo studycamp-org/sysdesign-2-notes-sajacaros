@@ -1,0 +1,4 @@
+confluent-kafka==2.16.1
+pyarrow==26.0.1
+boto3==1.44.4
+duckdb==1.5.6

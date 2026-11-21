@@ -1,0 +1,31 @@
+# Log Watcher: clicks.log 의 끝을 따라 읽어(tail) Kafka raw-clicks 로 보낸다.
+# 읽은 위치는 /logs/fluent-bit.db 에 남겨, 재시작해도 이어서 읽는다.
+service:
+  flush: 1
+  log_level: info
+  http_server: on          # 처리량은 http://fluent-bit:2020/api/v1/metrics
+  http_listen: 0.0.0.0
+  http_port: 2020
+
+parsers:
+  - name: clickjson
+    format: json
+
+pipeline:
+  inputs:
+    - name: tail
+      tag: clicks
+      path: /logs/clicks.log
+      db: /logs/fluent-bit.db
+      read_from_head: true
+      refresh_interval: 1
+      parser: clickjson
+
+  outputs:
+    - name: kafka
+      match: clicks
+      brokers: kafka:9092
+      topics: raw-clicks
+      format: json
+      message_key_field: ad_id
+      timestamp_key: "@fluentbit_ts"

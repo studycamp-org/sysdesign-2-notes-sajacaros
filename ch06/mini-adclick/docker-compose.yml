@@ -1,0 +1,156 @@
+# ch06 광고 클릭 이벤트 집계 실습 (교재 6장의 문제들을 직접 일으켜 보기)
+#   휴대폰(브라우저) → 광고 서버(api) → clicks.log → Fluent Bit → Kafka raw-clicks → 집계 서비스 → Kafka agg-results → ClickHouse
+#   raw-clicks → 원본 보관(RustFS, Parquet) → 재집계 검증(DuckDB) → ClickHouse 보정
+#   대시보드(휴대폰·운영자 화면) http://localhost:8006 · ClickHouse http://localhost:8123 · RustFS 콘솔 http://localhost:9001
+name: mini-adclick
+
+x-app: &app
+  build: ./app
+  image: mini-adclick-app
+  restart: unless-stopped
+  environment: &env
+    KAFKA: kafka:9092
+    CH_URL: http://clickhouse:8123
+    CH_USER: default
+    CH_PASSWORD: demo
+    S3_ENDPOINT: http://rustfs:9000
+    S3_KEY: rustfsadmin
+    S3_SECRET: rustfsadmin
+    S3_BUCKET: raw-clicks
+    # 최신 boto3 의 기본 체크섬 헤더를 S3 호환 저장소에 강요하지 않는다
+    AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+    AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+
+services:
+  # Apache Kafka 단일 노드 (KRaft 모드: ZooKeeper 없이 브로커가 컨트롤러 역할까지 맡는다)
+  kafka:
+    image: apache/kafka:4.1.0
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_HEAP_OPTS: -Xms512m -Xmx512m
+    volumes:  # Kafka 로그는 메모리에만. 켤 때마다 빈 토픽
+      - { type: tmpfs, target: /var/lib/kafka/data, tmpfs: { mode: 01777 } }
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+
+  # 토픽 세 개를 미리 만든다
+  #   raw-clicks    원시 클릭 + 광고 서버의 1초 tick (데이터가 적어 1 파티션)
+  #   agg-results   집계 결과 (트랜잭션으로 쓴다)
+  #   agg-snapshots 집계 서비스 상태 스냅숏 (키 하나만 남기는 compact 토픽)
+  kafka-init:
+    image: apache/kafka:4.1.0
+    restart: "no"
+    depends_on:
+      kafka: { condition: service_healthy }
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        T="/opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --replication-factor 1"
+        $$T --topic raw-clicks --partitions 1
+        $$T --topic agg-results --partitions 1
+        $$T --topic agg-snapshots --partitions 1 \
+          --config cleanup.policy=compact --config segment.ms=60000 \
+          --config min.cleanable.dirty.ratio=0.01 --config delete.retention.ms=60000
+        echo "topics ready"
+
+  # 집계 결과 저장소. Kafka 엔진 테이블이 agg-results 를 직접 읽는다 (Database Writer 역할)
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.8
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_PASSWORD: demo
+    ports: ["8123:8123"]
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    volumes:
+      - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+      - { type: tmpfs, target: /var/lib/clickhouse, tmpfs: { mode: 01777 } }
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --password demo -q 'SELECT count() FROM adclick.ad_clicks' >/dev/null"]
+      interval: 3s
+      retries: 40
+
+  # 원시 데이터 보관용 S3 호환 저장소
+  rustfs:
+    image: rustfs/rustfs:1.0.6
+    restart: unless-stopped
+    environment:
+      RUSTFS_ACCESS_KEY: rustfsadmin
+      RUSTFS_SECRET_KEY: rustfsadmin
+      RUSTFS_CONSOLE_ENABLE: "true"
+    ports: ["9001:9001"]
+    volumes:
+      - { type: tmpfs, target: /data, tmpfs: { mode: 01777 } }
+      - { type: tmpfs, target: /logs, tmpfs: { mode: 01777 } }
+
+  # Log Watcher: 파일 끝을 따라 읽어 Kafka raw-clicks 로
+  fluent-bit:
+    image: fluent/fluent-bit:5.1.5
+    restart: unless-stopped
+    command: ["/fluent-bit/bin/fluent-bit", "-c", "/fluent-bit/etc/fluent-bit.yaml"]
+    volumes:
+      - ./fluent-bit/fluent-bit.yaml:/fluent-bit/etc/fluent-bit.yaml:ro
+      - clicklogs:/logs
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      api: { condition: service_started }
+
+  # 집계 서비스: 10초 윈도 + 워터마크 + 중복 제거, 전달 보장 전략 3가지, 스냅숏, 재계산
+  aggregator:
+    <<: *app
+    environment: { <<: *env, SERVICE: aggregator }
+    command: python aggregator.py
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      clickhouse: { condition: service_healthy }
+      api: { condition: service_started }
+
+  # 원본 보관: raw-clicks → Parquet → RustFS (dt=/hour= 파티션)
+  archiver:
+    <<: *app
+    environment: { <<: *env, SERVICE: archiver }
+    command: python archiver.py
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      rustfs: { condition: service_started }
+
+  # 재집계 검증: DuckDB 로 Parquet 원본을 다시 집계해 ClickHouse 와 비교·보정
+  recon:
+    <<: *app
+    environment: { <<: *env, SERVICE: recon }
+    command: python recon.py
+    depends_on:
+      clickhouse: { condition: service_healthy }
+      rustfs: { condition: service_started }
+
+  # 광고 서버 + 질의 API + 대시보드. 휴대폰 클릭을 받아 clicks.log 에 쓰고, 1초마다 tick 도 쓴다
+  api:
+    <<: *app
+    environment: { <<: *env, SERVICE: api }
+    command: python api.py
+    ports: ["8006:8080"]
+    volumes: ["clicklogs:/logs"]
+    depends_on:
+      clickhouse: { condition: service_healthy }
+
+volumes:
+  clicklogs:

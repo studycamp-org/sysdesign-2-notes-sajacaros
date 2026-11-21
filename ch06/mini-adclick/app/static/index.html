@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>광고 클릭 집계 실험실</title>
+<style>
+:root {
+  --paper:#fcfbfa; --surface:#ffffff; --stone:#f1ece9;
+  --ink:#1d1918; --muted:#635b57; --soft:#9b908a; --line:#e8dfda; --line2:#d7c9c1;
+  --accent:#bd3528; --accent-tint:#f7e6dc; --link:#3D5FA8; --ok:#008C7E; --warn:#e06a36; --wait:#f6ead2;
+  --mono: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  --sans: "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --paper:#17130f; --surface:#1f1a16; --stone:#272019; --ink:#f0e9e4; --muted:#b7a89f; --soft:#8a7b72;
+          --line:#332a24; --line2:#463a32; --accent:#e8654f; --accent-tint:#3a241b; --link:#7a9ae0; --ok:#3cc4b4;
+          --warn:#f0964f; --wait:#3a3020; }
+}
+* { box-sizing:border-box; margin:0; padding:0; }
+body { background:var(--paper); color:var(--ink); font-family:var(--sans); font-size:14px; line-height:1.5; padding:20px 16px 48px; }
+.wrap { max-width:1320px; margin:0 auto; }
+.eyebrow { font-family:var(--mono); font-size:11px; letter-spacing:.16em; color:var(--accent); text-transform:uppercase; }
+h1 { font-size:24px; letter-spacing:-.02em; margin:2px 0; }
+.sub { color:var(--muted); margin-bottom:14px; font-size:13px; }
+h2 { font-size:14px; margin-bottom:8px; display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
+h2 .tag { font-family:var(--mono); font-size:10px; color:var(--soft); font-weight:400; letter-spacing:.06em; }
+.card { background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:14px; }
+.row { display:grid; gap:12px; margin-top:12px; }
+.r1 { grid-template-columns: 290px 1fr; }
+.r2 { grid-template-columns: 1fr 360px; }
+.r3 { grid-template-columns: 1fr 1fr; }
+@media (max-width:980px) { .r1, .r2, .r3 { grid-template-columns:1fr; } }
+.muted { color:var(--muted); } .soft { color:var(--soft); } .small { font-size:12px; } .mono { font-family:var(--mono); }
+
+/* 휴대폰 */
+.phone { border:2px solid var(--ink); border-radius:24px; padding:14px 12px; background:var(--paper); }
+.phone .bar { display:flex; justify-content:space-between; font-family:var(--mono); font-size:11px; color:var(--muted); margin-bottom:10px; }
+.phone .bar .net.off { color:var(--accent); font-weight:700; }
+.adbtn { display:flex; align-items:center; gap:10px; width:100%; text-align:left; border:1px solid var(--line2); background:var(--surface);
+         color:var(--ink); border-radius:10px; padding:9px 10px; margin-bottom:7px; cursor:pointer; font:inherit; }
+.adbtn:hover { border-color:var(--accent); }
+.adbtn:active { transform:scale(.98); }
+.adbtn .e { font-size:22px; }
+.adbtn .n { font-weight:700; font-size:13px; }
+.adbtn .i { font-family:var(--mono); font-size:10px; color:var(--soft); }
+.toggle { display:flex; align-items:center; justify-content:space-between; padding:6px 2px; border-top:1px dashed var(--line); font-size:13px; }
+.toggle small { display:block; color:var(--soft); font-size:11px; }
+.sw { position:relative; width:38px; height:22px; flex:none; }
+.sw input { opacity:0; width:0; height:0; }
+.sw span { position:absolute; inset:0; background:var(--line2); border-radius:22px; cursor:pointer; transition:.15s; }
+.sw span::before { content:""; position:absolute; width:16px; height:16px; left:3px; top:3px; background:#fff; border-radius:50%; transition:.15s; }
+.sw input:checked + span { background:var(--accent); }
+.sw input:checked + span::before { transform:translateX(16px); }
+.sw input:disabled + span { opacity:.4; cursor:not-allowed; }
+.queue { font-family:var(--mono); font-size:11px; color:var(--muted); min-height:18px; margin-top:6px; }
+.plog { font-family:var(--mono); font-size:11px; max-height:110px; overflow:auto; margin-top:6px; border-top:1px dashed var(--line); padding-top:4px; }
+.plog div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.plog .bad { color:var(--warn); }
+
+/* 타임라인 */
+#tl { width:100%; display:block; }
+.legend { display:flex; flex-wrap:wrap; gap:12px; font-size:12px; color:var(--muted); margin-top:6px; }
+.legend i { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; vertical-align:-1px; }
+
+/* 표 */
+table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+th, td { text-align:left; padding:5px 6px; border-bottom:1px solid var(--line); }
+th { color:var(--soft); font-weight:500; font-size:12px; }
+td.num, th.num { text-align:right; }
+.st { font-size:11px; padding:1px 6px; border-radius:3px; border:1px solid var(--line2); color:var(--muted); white-space:nowrap; }
+.st.open { border-style:dashed; }
+.st.waiting { background:var(--wait); border-color:var(--warn); color:var(--ink); }
+.st.closed { background:var(--stone); }
+.v-ok { color:var(--ok); font-weight:700; } .v-bad { color:var(--accent); font-weight:700; } .v-wait { color:var(--soft); }
+.chip { display:inline-block; font-size:10px; padding:0 5px; border-radius:3px; border:1px solid var(--ok); color:var(--ok); margin-left:4px; }
+.chip.re { border-color:var(--link); color:var(--link); }
+tr.hl td { background:var(--accent-tint); }
+
+/* 운영자 */
+.op { display:grid; gap:10px; }
+.op .blk { border-top:1px dashed var(--line); padding-top:8px; }
+.op .blk:first-child { border-top:none; padding-top:0; }
+.op label.t { font-weight:700; font-size:13px; display:block; margin-bottom:4px; }
+input[type=range] { width:100%; accent-color:var(--accent); }
+.strat { display:grid; gap:5px; }
+.strat label { display:flex; gap:8px; align-items:flex-start; border:1px solid var(--line); border-radius:6px; padding:6px 8px; cursor:pointer; font-size:12px; }
+.strat label:has(input:checked) { border-color:var(--accent); background:var(--accent-tint); }
+.strat b { font-size:13px; }
+.flow { font-family:var(--mono); font-size:11px; color:var(--muted); }
+.btn { font:inherit; font-size:13px; border:1px solid var(--line2); background:var(--surface); color:var(--ink); border-radius:6px; padding:7px 10px; cursor:pointer; width:100%; text-align:left; }
+.btn:hover { border-color:var(--accent); }
+.btn.armed { background:var(--accent); color:#fff; border-color:var(--accent); }
+.btn small { display:block; color:var(--soft); font-size:11px; }
+.btn.armed small { color:#fff; opacity:.85; }
+.two { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+
+/* 내부 */
+.steps { display:flex; flex-wrap:wrap; gap:4px; align-items:center; margin:6px 0; }
+.steps span { font-size:11px; padding:2px 7px; border-radius:3px; background:var(--stone); font-family:var(--mono); }
+.steps em { color:var(--soft); font-style:normal; }
+.callout { border-left:3px solid var(--accent); padding:6px 10px; background:var(--stone); border-radius:0 6px 6px 0; font-size:13px; margin-top:6px; }
+.callout.ok { border-color:var(--ok); }
+.log { font-size:12px; max-height:230px; overflow:auto; }
+.log div { padding:3px 0; border-bottom:1px dashed var(--line); }
+.log .t { font-family:var(--mono); color:var(--soft); margin-right:6px; }
+.log .crash { color:var(--accent); } .log .start { color:var(--ok); } .log .recalc, .log .recon { color:var(--link); }
+details.guide { margin-top:12px; }
+details.guide summary { cursor:pointer; font-weight:700; }
+.guide ol { padding-left:20px; margin-top:8px; display:grid; gap:6px; font-size:13px; }
+.guide li b { color:var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="eyebrow">ch06 · 광고 클릭 이벤트 집계</p>
+  <h1>광고 클릭 집계 실험실</h1>
+  <p class="sub">휴대폰으로 광고를 누르고, 네트워크와 서버에 문제를 일으켜 보세요. 윈도는 10초(교재 1분을 축소), 시각은 UTC.
+    탭을 여러 개 열면 휴대폰이 여러 대가 됩니다.</p>
+
+  <details class="guide card">
+    <summary>실험 순서 (교재 3단계 주제별)</summary>
+    <ol>
+      <li><b>정상</b> — 광고 몇 번 누르기. 점이 윈도 안에 찍히고, 윈도가 닫히면 장부 = 집계 ✓</li>
+      <li><b>이벤트 시각 vs 처리 시각 (그림 12)</b> — ✈ 비행기 모드 켜고 몇 번 누른 뒤 8초쯤 있다가 끄기. 점은 누른 시각에, 점선은 도착 시각으로 이어진다. 처리 시각 열은 엉뚱한 윈도에 센다</li>
+      <li><b>워터마크 (그림 13·14)</b> — 워터마크 0초로 두고 2~3초짜리 비행기 모드 → 버려짐(✗). 5초로 올리고 다시 → 잡힘. 대신 윈도 결과가 늦게 나온다</li>
+      <li><b>아주 늦은 이벤트 → 재집계 검증 (그림 28)</b> — 비행기 모드로 30초 넘게 → ✗, 장부보다 집계가 모자람 → 🔍 재집계 검증 → 보정</li>
+      <li><b>클라이언트 중복</b> — 📶 불안정한 네트워크 켜고 누르기. 응답이 사라져 폰이 재전송(↻) → 같은 click_id 가 두 번 와도 한 번만 센다</li>
+      <li><b>서버 장애 중복·유실 (그림 17~20)</b> — 전략을 고르고 💥 장전 → 광고 누르기. ① 유실(−), ② 중복(+, 점이 ×2), ③ 정확</li>
+      <li><b>스냅숏 (그림 26·27)</b> — ③에서 스냅숏 켜고/끄고 💥. 기록에 '스냅숏에서 복구' vs '처음부터 N건 다시 읽어 복구'</li>
+      <li><b>버그 배포 → 재계산 (그림 11)</b> — 🐞 배포 후 몇 번 누르기 → 집계가 2배(+). 수정 배포 → 🔁 재계산 → 닫힌 윈도가 원본으로 다시 집계된다</li>
+    </ol>
+  </details>
+
+  <div class="row r1">
+    <div class="phone">
+      <div class="bar"><span id="pname"></span><span class="net" id="net">📶 연결됨</span></div>
+      <div id="ads"></div>
+      <div class="toggle"><div>✈ 비행기 모드<small>클릭이 폰에 쌓였다가 다시 켜면 전송</small></div>
+        <label class="sw"><input type="checkbox" id="airplane"><span></span></label></div>
+      <div class="toggle"><div>📶 불안정한 네트워크<small>응답이 사라지면 같은 클릭을 재전송</small></div>
+        <label class="sw"><input type="checkbox" id="unstable"><span></span></label></div>
+      <div class="queue" id="queue"></div>
+      <div class="plog" id="plog"></div>
+    </div>
+    <div class="card">
+      <h2>이벤트 시각 타임라인 <span class="tag">점 = 클릭(누른 시각) · 점선 = 늦게 도착 · 세로 띠 = 10초 윈도</span></h2>
+      <svg id="tl" viewBox="0 0 1000 300" role="img" aria-label="이벤트 시각 타임라인"></svg>
+      <div class="legend">
+        <span><i style="background:var(--ink)"></i>집계됨</span>
+        <span><i style="background:var(--accent)"></i>두 번 집계됨</span>
+        <span><i style="border:2px solid var(--ok);background:transparent"></i>중복 도착 → 한 번만</span>
+        <span style="color:var(--accent)">✗ 늦어서 버림</span>
+        <span><i style="border:1.5px dashed var(--soft);background:transparent"></i>아직 결과 없음 / 유실</span>
+        <span>굵은 테두리 = 내 폰</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="row r2">
+    <div class="card">
+      <h2>정답 장부 vs 집계 DB <span class="tag">장부 = 광고 서버가 받은 고유 클릭(이벤트 시각) · 집계 = ClickHouse sum(clicks)</span></h2>
+      <table id="wtab"><thead><tr><th>윈도 (UTC)</th><th>상태</th><th class="num">장부</th><th class="num">이벤트 시각 집계</th><th class="num">처리 시각 집계</th><th>판정</th></tr></thead><tbody></tbody></table>
+      <p class="small soft" style="margin-top:6px">상태: 열림 → <b>워터마크 대기</b>(윈도 시각은 지났지만 늦은 클릭을 기다림) → 닫힘. 판정은 닫힌 윈도에서만.</p>
+    </div>
+    <div class="card op">
+      <div class="blk">
+        <label class="t">워터마크 <span id="wmv" class="mono"></span></label>
+        <input type="range" id="wm" min="0" max="10" step="1">
+        <div class="small soft">길수록 늦은 클릭을 더 받지만 결과가 늦게 나온다</div>
+      </div>
+      <div class="blk">
+        <label class="t">전달 보장 전략</label>
+        <div class="strat">
+          <label><input type="radio" name="strategy" value="offset_first"><div><b>① 오프셋 먼저 저장</b> <span class="soft">그림 18</span><div class="flow">오프셋 저장 → 💥 → 결과 전송</div></div></label>
+          <label><input type="radio" name="strategy" value="send_then_offset"><div><b>② 결과 전송 후 오프셋 저장</b> <span class="soft">그림 19</span><div class="flow">결과 전송 → 💥 → 오프셋 저장</div></div></label>
+          <label><input type="radio" name="strategy" value="transaction"><div><b>③ 분산 트랜잭션</b> <span class="soft">그림 20</span><div class="flow">[결과 + 스냅숏 + 오프셋] → 💥 → 커밋</div></div></label>
+        </div>
+      </div>
+      <div class="blk">
+        <div class="toggle" style="border:none;padding:0 0 6px"><div><b>스냅숏</b><small>③에서 열린 윈도 상태를 오프셋과 함께 저장</small></div>
+          <label class="sw"><input type="checkbox" id="snapshot"><span></span></label></div>
+        <button class="btn" id="crash"><b>💥 다음 클릭 배치에서 죽이기</b><small>위 흐름의 💥 자리에서 집계 서비스가 죽는다. 장전 후 광고를 누르세요</small></button>
+      </div>
+      <div class="blk two">
+        <button class="btn" id="bug"></button>
+        <button class="btn" id="recalc"><b>🔁 재계산</b><small>닫힌 윈도를 원본부터 다시</small></button>
+      </div>
+      <div class="blk two">
+        <button class="btn" id="recon"><b>🔍 재집계 검증</b><small>DuckDB 로 원본과 비교·보정</small></button>
+        <button class="btn" id="bots"></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="row r3">
+    <div class="card">
+      <h2>집계 서비스 내부 <span class="tag" id="aggtag"></span></h2>
+      <div id="agg" class="small"></div>
+      <div id="reconbox" class="small" style="margin-top:10px"></div>
+    </div>
+    <div class="card">
+      <h2>기록</h2>
+      <div class="log" id="log"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const hms = ms => new Date(ms).toISOString().slice(11, 19);
+const EMOJI = {"ad-1": "👟", "ad-2": "☕", "ad-3": "📚"};
+const LANE = {"ad-1": 0, "ad-2": 1, "ad-3": 2};
+let V = null, CFG = null;
+
+// ---------- 휴대폰 ----------
+let PHONE;
+try { PHONE = localStorage.getItem("ch06-phone"); } catch (e) {}
+if (!PHONE) { PHONE = "폰-" + Math.random().toString(36).slice(2, 4).toUpperCase(); try { localStorage.setItem("ch06-phone", PHONE); } catch (e) {} }
+$("pname").textContent = PHONE;
+const queue = [];
+const rid = () => Math.random().toString(16).slice(2, 14).padEnd(12, "0");
+
+function plog(msg, bad) {
+  const d = document.createElement("div");
+  if (bad) d.className = "bad";
+  d.textContent = hms(Date.now()) + " " + msg;
+  $("plog").prepend(d);
+  while ($("plog").children.length > 30) $("plog").lastChild.remove();
+}
+
+function renderQueue() {
+  $("queue").textContent = queue.length ? `📦 폰에 쌓인 클릭 ${queue.length}건 (가장 오래된 것 ${Math.round((Date.now() - queue[0].event_ts) / 1000)}초 전)` : "";
+  $("net").textContent = $("airplane").checked ? "✈ 오프라인" : ($("unstable").checked ? "📶 불안정" : "📶 연결됨");
+  $("net").className = "net" + ($("airplane").checked ? " off" : "");
+}
+
+async function send(p, attempt = 1) {
+  try {
+    const r = await fetch("/api/click", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(p)});
+    await r.json();
+    const late = Date.now() - p.event_ts;
+    if ($("unstable").checked && attempt < 3 && Math.random() < 0.6) {
+      plog(`${p.ad_id} 보냄 → 응답 유실! 재전송 #${attempt + 1}`, true);
+      setTimeout(() => send(p, attempt + 1), 700);
+    } else {
+      plog(`${p.ad_id} 전송 완료${attempt > 1 ? ` (${attempt}번째 시도)` : ""}${late > 1500 ? ` · ${(late / 1000).toFixed(1)}초 늦게` : ""}`);
+    }
+  } catch (e) { plog("전송 실패: " + e, true); }
+}
+
+function clickAd(ad) {
+  const p = {click_id: rid(), ad_id: ad, event_ts: Date.now(), phone: PHONE};
+  if ($("airplane").checked) { queue.push(p); plog(`${ad} 누름 → 오프라인이라 폰에 보관`); renderQueue(); }
+  else send(p);
+}
+
+$("airplane").addEventListener("change", async () => {
+  renderQueue();
+  if (!$("airplane").checked && queue.length) {
+    plog(`다시 연결 → 쌓인 ${queue.length}건 전송`);
+    while (queue.length) { await send(queue.shift()); }
+    renderQueue();
+  }
+});
+$("unstable").addEventListener("change", renderQueue);
+setInterval(renderQueue, 1000);
+
+// ---------- 운영자 ----------
+async function post(url, body) {
+  const r = await fetch(url, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body || {})});
+  return r.json();
+}
+async function setCfg(patch) { CFG = await post("/api/config", patch); renderCfg(); }
+
+function renderCfg() {
+  if (!CFG) return;
+  if (document.activeElement !== $("wm")) $("wm").value = CFG.watermark_sec;
+  $("wmv").textContent = CFG.watermark_sec + "초";
+  document.querySelectorAll("input[name=strategy]").forEach(r => r.checked = r.value === CFG.strategy);
+  $("snapshot").checked = CFG.snapshot;
+  $("snapshot").disabled = CFG.strategy !== "transaction";
+  $("bug").innerHTML = CFG.bug ? "<b>✅ 버그 수정 배포</b><small>지금은 버그 버전 (×2)</small>" : "<b>🐞 버그 버전 배포</b><small>클릭을 두 번 세는 버전</small>";
+  $("bug").classList.toggle("armed", CFG.bug);
+  $("bots").innerHTML = CFG.bots ? "<b>🤖 배경 클릭 끄기</b><small>봇이 3초마다 클릭 중</small>" : "<b>🤖 배경 클릭 켜기</b><small>봇이 3초마다 한 번</small>";
+}
+
+$("wm").addEventListener("input", () => $("wmv").textContent = $("wm").value + "초");
+$("wm").addEventListener("change", () => setCfg({watermark_sec: Number($("wm").value)}));
+document.querySelectorAll("input[name=strategy]").forEach(r => r.addEventListener("change", () => setCfg({strategy: r.value})));
+$("snapshot").addEventListener("change", () => setCfg({snapshot: $("snapshot").checked}));
+$("bug").addEventListener("click", () => setCfg({bug: !CFG.bug}));
+$("bots").addEventListener("click", () => setCfg({bots: !CFG.bots}));
+$("crash").addEventListener("click", async () => {
+  const armed = !(V && V.agg && V.agg.crash_armed);
+  await post("/api/crash", {arm: armed});
+  refresh();
+});
+$("recalc").addEventListener("click", async () => { const r = await post("/api/recalc"); if (r.error) alert(r.error); refresh(); });
+$("recon").addEventListener("click", async () => {
+  $("recon").disabled = true;
+  const r = await post("/api/recon");
+  $("recon").disabled = false;
+  if (r.error) alert(r.error);
+  refresh();
+});
+
+// ---------- 타임라인 ----------
+function renderTimeline() {
+  const W = 1000, H = 300, L = 110, R = 990, top = 40, laneH = 70;
+  const now = V.now, t0 = now - 95000, t1 = now + 5000;
+  const x = t => L + (t - t0) / (t1 - t0) * (R - L);
+  const clamp = v => Math.max(L, Math.min(R, v));
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const C = {ink: css("--ink"), muted: css("--muted"), soft: css("--soft"), line: css("--line"), line2: css("--line2"),
+             accent: css("--accent"), ok: css("--ok"), warn: css("--warn"), wait: css("--wait"), stone: css("--stone"), paper: css("--paper")};
+  let s = "";
+  // 윈도 띠
+  for (const w of V.windows) {
+    const a = x(w.w), b = x(w.w + 10000);
+    if (b < L || a > R) continue;
+    const fill = w.status === "closed" ? C.stone : w.status === "waiting" ? C.wait : C.paper;
+    s += `<rect x="${clamp(a)}" y="${top}" width="${clamp(b) - clamp(a)}" height="${laneH * 3}" fill="${fill}"/>`;
+    s += `<line x1="${a}" y1="${top}" x2="${a}" y2="${top + laneH * 3 + 6}" stroke="${C.line2}" stroke-width="1"/>`;
+    if (a >= L - 1) s += `<text x="${a + 3}" y="${top + laneH * 3 + 18}" font-size="10" fill="${C.soft}" font-family="monospace">${w.label}</text>`;
+  }
+  // 레인
+  for (const [ad, i] of Object.entries(LANE)) {
+    const y = top + laneH * i + laneH / 2;
+    s += `<line x1="${L}" y1="${y}" x2="${R}" y2="${y}" stroke="${C.line}" stroke-dasharray="2,4"/>`;
+    s += `<text x="${L - 8}" y="${y + 4}" text-anchor="end" font-size="12" fill="${C.muted}">${EMOJI[ad]} ${esc(V.ads[ad]).slice(0, 7)}</text>`;
+  }
+  // 기준선
+  const vline = (t, color, label, dy, dash) => {
+    if (!t || t < t0) return;
+    const X = x(t);
+    s += `<line x1="${X}" y1="${top - 6}" x2="${X}" y2="${top + laneH * 3}" stroke="${color}" stroke-width="1.5" ${dash ? `stroke-dasharray="${dash}"` : ""}/>`;
+    s += `<text x="${X}" y="${top - 10 - dy}" text-anchor="middle" font-size="11" fill="${color}" font-weight="700">${label}</text>`;
+  };
+  vline(V.closed_upto, C.soft, "닫힘 경계", 0, "2,2");
+  vline(V.watermark, C.accent, "워터마크", 12, "5,3");
+  vline(now, C.ink, "지금", 0);
+  // 클릭
+  for (const c of V.clicks) {
+    const y = top + laneH * LANE[c.ad_id] + laneH / 2 + ((parseInt(c.click_id.slice(0, 2), 16) % 5) - 2) * 7;
+    const X = x(c.event_ts);
+    if (X < L - 5) continue;
+    const recv = c.recv[0], d = c.decisions;
+    const counted = d.filter(v => v === "counted").length + d.filter(v => v === "counted_bug").length * 2;
+    const late = d.includes("late") && counted === 0;
+    const mine = c.phone === PHONE;
+    if (recv - c.event_ts > 1500) {
+      const RX = x(Math.min(recv, t1));
+      s += `<path d="M ${X} ${y} Q ${(X + RX) / 2} ${y - 26} ${RX} ${y - 4}" fill="none" stroke="${C.soft}" stroke-dasharray="3,3"/>`;
+      s += `<circle cx="${RX}" cy="${y - 4}" r="2.5" fill="${C.soft}"/>`;
+    }
+    const sw = mine ? 2.5 : 1.2;
+    if (late) {
+      s += `<g stroke="${C.accent}" stroke-width="2.5"><line x1="${X - 6}" y1="${y - 6}" x2="${X + 6}" y2="${y + 6}"/><line x1="${X - 6}" y1="${y + 6}" x2="${X + 6}" y2="${y - 6}"/></g>`;
+    } else if (counted === 0) {
+      s += `<circle cx="${X}" cy="${y}" r="6" fill="none" stroke="${C.soft}" stroke-width="${sw}" stroke-dasharray="2,2"/>`;
+    } else {
+      s += `<circle cx="${X}" cy="${y}" r="6" fill="${counted > 1 ? C.accent : C.ink}" stroke="${mine ? C.accent : C.paper}" stroke-width="${mine ? 2 : 1}"/>`;
+      if (counted > 1) s += `<text x="${X + 8}" y="${y - 6}" font-size="11" font-weight="700" fill="${C.accent}">×${counted}</text>`;
+    }
+    if (c.recv.length > 1 || d.includes("dup")) {
+      s += `<circle cx="${X}" cy="${y}" r="10" fill="none" stroke="${C.ok}" stroke-width="1.5"/>`;
+      s += `<text x="${X + 11}" y="${y + 12}" font-size="10" fill="${C.ok}">↻${c.recv.length}</text>`;
+    }
+  }
+  $("tl").innerHTML = s;
+}
+
+// ---------- 표·내부·기록 ----------
+function renderWindows() {
+  const rows = V.windows.slice().reverse().filter(w => w.ledger || w.event || w.proc || w.status !== "closed").slice(0, 10);
+  $("wtab").querySelector("tbody").innerHTML = rows.map(w => {
+    const st = {open: "열림", waiting: "워터마크 대기", closed: "닫힘"}[w.status];
+    let v = '<span class="v-wait">집계 중</span>';
+    if (w.status === "closed") {
+      const d = w.event - w.ledger;
+      v = d === 0 ? '<span class="v-ok">✓ 일치</span>' : d > 0 ? `<span class="v-bad">+${d} 많음 (중복)</span>` : `<span class="v-bad">${d} 모자람 (누락)</span>`;
+    }
+    const chips = (w.recon ? `<span class="chip">보정 ${w.recon > 0 ? "+" : ""}${w.recon}</span>` : "") + (w.recalc ? '<span class="chip re">재계산</span>' : "");
+    const procDiff = w.proc !== w.ledger && w.status === "closed";
+    return `<tr class="${w.status === "closed" && w.event !== w.ledger ? "hl" : ""}"><td class="mono">${w.label}</td><td><span class="st ${w.status}">${st}</span></td>
+      <td class="num">${w.ledger}</td><td class="num"><b>${w.event}</b>${chips}</td>
+      <td class="num ${procDiff ? "soft" : ""}">${w.proc}${procDiff ? " ≠" : ""}</td><td>${v}</td></tr>`;
+  }).join("") || '<tr><td colspan="6" class="soft">휴대폰에서 광고를 눌러 보세요</td></tr>';
+}
+
+function renderAgg() {
+  const a = V.agg;
+  $("aggtag").textContent = a.down ? "응답 없음" : `커밋 오프셋 ${a.committed_offset ?? "–"} · lag ${a.lag ?? "–"}`;
+  if (a.down) { $("agg").innerHTML = '<div class="callout">집계 서비스가 응답하지 않는다 — 다시 뜨는 중일 수 있다</div>'; return; }
+  const steps = (a.last_steps || []).map(s => `<span>${esc(s.step)}</span>`).join("<em>→</em>");
+  const r = a.restore || {};
+  const how = {snapshot: "스냅숏에서 복구", replay: `raw-clicks 처음부터 <b>${r.replayed}</b>건 다시 읽어 복구`, empty: "빈 상태로 시작 (커밋된 오프셋부터)"}[r.how] || "";
+  const rc = a.recalc;
+  $("agg").innerHTML = `
+    <div>지금 전략: <b>${esc({offset_first: "① 오프셋 먼저", send_then_offset: "② 결과 전송 후 오프셋", transaction: "③ 트랜잭션"}[a.cfg.strategy])}</b>
+      ${a.cfg.strategy === "transaction" ? `· 스냅숏 ${a.cfg.snapshot ? "켬" : "끔"}` : ""} · 워터마크 ${a.cfg.watermark_sec}초 ${a.cfg.bug ? '· <b style="color:var(--accent)">🐞 버그 버전</b>' : ""}
+      ${a.crash_armed ? ' · <b style="color:var(--accent)">💥 장전됨</b>' : ""}</div>
+    <div class="steps"><span style="background:none;padding-left:0">마지막 배치</span>${steps}</div>
+    <div>최신 이벤트 시각 <b class="mono">${a.max_ts ? hms(a.max_ts) : "–"}</b> · 워터마크 <b class="mono">${a.watermark ? hms(a.watermark) : "–"}</b>
+      · 열린 윈도 ${(a.open_windows || []).map(w => hms(w)).join(", ") || "–"}</div>
+    <div class="callout ok">마지막 기동: ${how} · ${r.took_ms ?? "–"}ms${r.open_windows && r.open_windows.length ? ` · 되살린 열린 윈도 ${r.open_windows.join(", ")}` : ""}</div>
+    ${rc ? `<div class="callout">${rc.running ? "🔁 재계산 중…" : `🔁 마지막 재계산: ${hms(Date.parse(rc.bound.replace(" ", "T") + "Z"))} 앞 윈도 · 이벤트 ${rc.events}건 다시 읽음 · 클릭 ${rc.clicks} · ${rc.took_ms}ms`}</div>` : ""}`;
+  const rcn = V.recon;
+  if (rcn && rcn.ran_at) {
+    const rows = (rcn.samples || []).map(x => `<tr><td class="mono">${x.window}</td><td>${EMOJI[x.ad_id] || ""} ${x.ad_id}</td><td class="num">${x.truth}</td><td class="num">${x.stream}</td><td class="num">${x.truth - x.stream > 0 ? "+" : ""}${x.truth - x.stream}</td></tr>`).join("");
+    $("reconbox").innerHTML = `<b>🔍 재집계 검증</b> <span class="soft">${rcn.ran_at.slice(11)} · ${rcn.range} · 윈도 ${rcn.windows}개 · ${rcn.took_ms}ms</span>
+      ${rows ? `<table style="margin-top:4px"><thead><tr><th>윈도</th><th>광고</th><th class="num">원본</th><th class="num">스트리밍</th><th class="num">보정</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="callout ok">불일치 없음 — 스트리밍 결과가 원본과 같다</div>'}`;
+  } else if (rcn && rcn.error) {
+    $("reconbox").innerHTML = `<div class="callout">${esc(rcn.error)}</div>`;
+  }
+}
+
+function renderLog() {
+  $("log").innerHTML = V.events.map(e => `<div class="${e.kind}"><span class="t">${hms(e.at)}</span>${esc(e.msg)}</div>`).join("") || '<div class="soft">아직 기록 없음</div>';
+}
+
+// ---------- 루프 ----------
+function renderAds() {
+  $("ads").innerHTML = Object.entries(V ? V.ads : {"ad-1": "가벼운 러닝화", "ad-2": "싱글 오리진 원두", "ad-3": "시스템 설계 책"}).map(([id, n]) =>
+    `<button class="adbtn" data-ad="${id}"><span class="e">${EMOJI[id]}</span><span><div class="n">${esc(n)}</div><div class="i">${id}</div></span></button>`).join("");
+}
+$("ads").addEventListener("click", e => { const b = e.target.closest("button"); if (b) clickAd(b.dataset.ad); });
+
+async function refresh() {
+  try {
+    V = await (await fetch("/api/view")).json();
+    if (!CFG || document.activeElement?.name !== "strategy") { CFG = V.config; renderCfg(); }
+    renderTimeline(); renderWindows(); renderAgg(); renderLog();
+    $("crash").classList.toggle("armed", !!V.agg.crash_armed);
+    $("crash").querySelector("b").textContent = V.agg.crash_armed ? "💥 장전됨 — 광고를 누르세요 (다시 누르면 해제)" : "💥 다음 클릭 배치에서 죽이기";
+  } catch (e) { /* 다음 주기에 다시 */ }
+}
+renderAds();
+refresh();
+setInterval(refresh, 1000);
+</script>
+</body>
+</html>
