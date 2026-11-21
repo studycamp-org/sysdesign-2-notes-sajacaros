@@ -51,6 +51,11 @@
     .card ol, .card ul { padding-left: 1.2rem; font-size: 0.92rem; }
     .card li { margin: 0.3rem 0; }
     code { font-family: var(--font-mono); font-size: 0.85em; background: #f1ece9; padding: 0 0.3em; border-radius: 3px; }
+    .versions { margin-top: 1rem; }
+    .versions table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    .versions th, .versions td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--rule); }
+    .versions th { color: var(--soft); font-weight: 500; font-size: 0.8rem; }
+    .versions td.v { font-family: var(--font-mono); white-space: nowrap; }
     footer { margin-top: 2rem; padding-top: 0.75rem; border-top: 1px solid var(--rule); font-family: var(--font-mono); font-size: 0.7rem; color: var(--soft); }
   </style>
 </head>
@@ -138,7 +143,7 @@
       <rect x="352" y="102" width="40" height="12" rx="2" fill="transparent" stroke="rgba(99,91,87,0.5)" stroke-width="0.8"/>
       <text x="372" y="111" fill="#635b57" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">TOPIC</text>
       <text x="416" y="136" fill="#1d1918" font-size="12" font-weight="700" font-family="'Geist Mono', monospace" text-anchor="middle">raw-clicks</text>
-      <text x="416" y="152" fill="#635b57" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">Kafka (KRaft)</text>
+      <text x="416" y="152" fill="#635b57" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">Kafka</text>
       <text x="416" y="166" fill="#9b908a" font-size="9" font-family="'Noto Sans KR', sans-serif" text-anchor="middle">재처리 원천 · 보존</text>
 
       <!-- 4. Aggregation Service (focal) -->
@@ -146,7 +151,7 @@
       <rect x="528" y="96" width="200" height="80" rx="6" fill="rgba(189,53,40,0.07)" stroke="#bd3528" stroke-width="1.2"/>
       <rect x="536" y="102" width="48" height="12" rx="2" fill="transparent" stroke="rgba(189,53,40,0.5)" stroke-width="0.8"/>
       <text x="560" y="111" fill="#bd3528" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">FLINK</text>
-      <text x="628" y="132" fill="#1d1918" font-size="12" font-weight="700" font-family="'Noto Sans KR', sans-serif" text-anchor="middle">Apache Flink 2.2</text>
+      <text x="628" y="132" fill="#1d1918" font-size="12" font-weight="700" font-family="'Noto Sans KR', sans-serif" text-anchor="middle">Apache Flink</text>
       <text x="628" y="148" fill="#635b57" font-size="9" font-family="'Noto Sans KR', sans-serif" text-anchor="middle">Flink SQL · 10초 TUMBLE · 워터마크</text>
       <text x="628" y="164" fill="#635b57" font-size="9" font-family="'Noto Sans KR', sans-serif" text-anchor="middle">COUNT(DISTINCT) · 체크포인트 · 2PC 싱크</text>
 
@@ -156,7 +161,7 @@
       <rect x="832" y="102" width="40" height="12" rx="2" fill="transparent" stroke="rgba(99,91,87,0.5)" stroke-width="0.8"/>
       <text x="852" y="111" fill="#635b57" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">TOPIC</text>
       <text x="896" y="136" fill="#1d1918" font-size="12" font-weight="700" font-family="'Geist Mono', monospace" text-anchor="middle">agg-results</text>
-      <text x="896" y="152" fill="#635b57" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">Kafka (KRaft)</text>
+      <text x="896" y="152" fill="#635b57" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">Kafka</text>
       <text x="896" y="166" fill="#9b908a" font-size="9" font-family="'Noto Sans KR', sans-serif" text-anchor="middle">트랜잭션 쓰기</text>
 
       <!-- 6. ClickHouse (focal, with internals) -->
@@ -263,6 +268,21 @@
           <li>🐞 버그 배포(세이브포인트) → 🔁 재계산(유한 잡) (그림 11, 카파)</li>
         </ol>
       </div>
+    </div>
+
+    <div class="card versions">
+      <p class="eyebrow">구성 요소 버전 (2026-11-21 기준)</p>
+      <table>
+        <thead><tr><th>구성 요소</th><th>버전</th><th>비고</th></tr></thead>
+        <tbody>
+          <tr><td>Apache Kafka</td><td class="v">4.1.0</td><td>KRaft 모드 (ZooKeeper 없음), 단일 노드</td></tr>
+          <tr><td>Apache Flink</td><td class="v">2.2.1</td><td>Kafka SQL 커넥터 5.0.0-2.2, SQL Gateway 로 잡 제출</td></tr>
+          <tr><td>ClickHouse</td><td class="v">26.8</td><td>Kafka 엔진 + MV + MergeTree</td></tr>
+          <tr><td>Fluent Bit</td><td class="v">5.1.5</td><td>tail → Kafka</td></tr>
+          <tr><td>RustFS</td><td class="v">1.0.6</td><td>S3 호환 원본 보관</td></tr>
+          <tr><td>DuckDB</td><td class="v">1.5.6</td><td>Python 패키지, httpfs 로 S3 직접 읽기</td></tr>
+        </tbody>
+      </table>
     </div>
 
     <footer>ch06 광고 클릭 이벤트 집계 · 데모 구성 · 교재와 다른 점: Cassandra → ClickHouse, Database Writer → Kafka 엔진 + MV, 윈도 1분 → 10초</footer>
