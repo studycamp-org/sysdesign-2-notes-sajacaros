@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>쉼표 스테이 파트너 — 호텔 관리</title>
+<style>
+:root{--bg:#f3f4f6;--ink:#111827;--soft:#6b7280;--line:#e5e7eb;--brand:#1f2937;--acc:#0f6b5c;--bad:#b91c1c}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.55 "Pretendard","Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif}
+header{background:var(--brand);color:#fff;padding:0 24px;height:56px;display:flex;align-items:center;gap:16px}
+header b{font-size:17px}header span{opacity:.6;font-size:12px}
+header select{margin-left:auto;padding:6px 10px;border-radius:8px;border:0;font:inherit}
+main{max-width:1200px;margin:0 auto;padding:20px 24px;display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.box{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px;overflow:auto}
+.box h2{margin:0 0 10px;font-size:16px;display:flex;justify-content:space-between;align-items:center}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+th{color:var(--soft);font-weight:500}td.n{text-align:right;font-variant-numeric:tabular-nums}
+.st{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px}
+.pending{background:#fff4e5;color:#9a4b00}.paid{background:#e4f5ea;color:#15803d}.rejected,.cancelled{background:#f1f0ed;color:#6b7280}.refunded{background:#e8eefc;color:#1d4ed8}
+button{font:inherit;cursor:pointer;border:1px solid var(--line);background:#fff;border-radius:7px;padding:4px 10px}
+button.x{color:var(--bad);border-color:#f1c9c9}
+input[type=number]{width:64px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;font:inherit;text-align:right}
+select{font:inherit}
+tr.over td{background:#fdecec}
+.note{color:var(--soft);font-size:12px;margin:8px 0 0}
+@media(max-width:900px){main{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header><b>쉼표 스테이 파트너</b><span>Internal API · 호텔 직원 전용 (실제로는 VPN 뒤)</span>
+  <select id="hotel"></select></header>
+<main>
+  <section class="box" style="grid-column:1/-1"><h2>예약 목록 <button onclick="loadRes()">새로고침</button></h2>
+    <table id="res"></table>
+    <p class="note">손님은 객실 유형을 예약합니다. 객실 번호는 체크인 때 정해집니다.</p></section>
+  <section class="box" style="grid-column:1/-1"><h2>객실 재고 <span><select id="type"></select> <input type="date" id="start"></span></h2>
+    <table id="inv"></table>
+    <p class="note">판매 객실 수(total_inventory)를 줄이면 수리 등으로 객실을 잠시 판매에서 뺍니다. 이미 예약된 수보다 줄이면 초과 판매 상태가 됩니다(DB 제약 조건 방식이면 막힙니다).</p></section>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const ymd = d => new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
+async function api(m, p, b) { const r = await fetch(p, {method: m, headers: {"content-type": "application/json"}, body: b ? JSON.stringify(b) : undefined});
+  let d = null; try { d = await r.json(); } catch {} return {ok: r.ok, data: d}; }
+let HS = [];
+async function init() {
+  HS = (await api("GET", "/internal/hotels")).data;
+  $("#hotel").innerHTML = HS.map(h => `<option value="${h.hotel_id}">${esc(h.name)}</option>`).join("");
+  $("#start").value = ymd(new Date());
+  $("#hotel").onchange = () => { types(); loadRes(); };
+  $("#type").onchange = loadInv; $("#start").onchange = loadInv;
+  types(); loadRes();
+}
+function H() { return HS.find(h => h.hotel_id === +$("#hotel").value); }
+function types() { $("#type").innerHTML = H().room_types.map(t => `<option value="${t.room_type_id}">${esc(t.name)}</option>`).join(""); loadInv(); }
+async function loadRes() {
+  const rows = (await api("GET", `/internal/hotels/${H().hotel_id}/reservations`)).data || [];
+  const tn = id => H().room_types.find(t => t.room_type_id === id)?.name;
+  $("#res").innerHTML = `<tr><th>예약 번호</th><th>손님 ID</th><th>객실 유형</th><th>체크인</th><th>체크아웃</th><th style="text-align:right">객실</th><th style="text-align:right">금액</th><th>상태</th><th></th></tr>` +
+    (rows.length ? rows.map(r => `<tr><td>${r.reservation_id}</td><td>${r.guest_id}</td><td>${esc(tn(r.room_type_id))}</td><td>${r.start_date}</td><td>${r.end_date}</td>
+      <td class="n">${r.room_count}</td><td class="n">${r.amount.toLocaleString()}원</td><td><span class="st ${r.status}">${r.status}</span></td>
+      <td>${["pending", "paid"].includes(r.status) ? `<button class="x" onclick="cancel('${r.reservation_id}')">손님 대신 취소</button>` : ""}</td></tr>`).join("")
+      : `<tr><td colspan="9" style="color:#6b7280">예약이 없습니다</td></tr>`);
+}
+async function loadInv() {
+  const rows = (await api("GET", `/internal/hotels/${H().hotel_id}/inventory?room_type_id=${$("#type").value}&start=${$("#start").value}&days=14`)).data || [];
+  $("#inv").innerHTML = `<tr><th>날짜</th><th>판매 객실 수</th><th style="text-align:right">한도(초과 예약 포함)</th><th style="text-align:right">예약됨</th><th style="text-align:right">남음</th></tr>` +
+    rows.map(r => `<tr class="${r.db_left < 0 ? "over" : ""}"><td>${r.date}</td>
+      <td><input type="number" min="0" value="${r.total_inventory}" onchange="setInv('${r.date}', this.value)"></td>
+      <td class="n">${r.limit}</td><td class="n">${r.total_reserved}</td><td class="n">${r.db_left}</td></tr>`).join("");
+}
+async function setInv(date, v) {
+  const r = await api("PUT", "/internal/inventory", {hotelID: H().hotel_id, roomTypeID: +$("#type").value, date, totalInventory: +v});
+  if (!r.ok) alert(r.data?.message || "실패"); loadInv();
+}
+async function cancel(id) { if (!confirm("이 예약을 취소할까요? 결제된 예약은 환불됩니다.")) return;
+  const r = await api("POST", `/internal/reservations/${id}/cancel`); if (!r.ok) alert(r.data?.message || "실패"); loadRes(); loadInv(); }
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,69 @@
+# ch07 호텔 예약 시스템 데모 (교재 그림 4·5 구성)
+#   손님 사이트 + 개발자 패널 http://localhost:8007 · 호텔 직원 관리자 http://localhost:8008
+#   PostgreSQL 인스턴스 1개 안에 서비스마다 스키마 + 계정을 따로 둔다. 재고 캐시는 Redis.
+name: mini-hotel
+
+x-app: &app
+  build: ./app
+  image: mini-hotel-app
+  restart: unless-stopped
+  depends_on:
+    postgres: { condition: service_healthy }
+    redis: { condition: service_started }
+
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: hotel
+    ports: ["127.0.0.1:15437:5432"]   # psql 로 직접 보고 싶을 때
+    volumes:
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - { type: tmpfs, target: /var/lib/postgresql/data }   # 끄면 사라진다
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d hotel"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7.4
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+
+  # ── Public API Gateway (정적 파일 = CDN 역할, 인증, 처리율 제한, 라우팅) ──
+  gateway:
+    <<: *app
+    environment: { MODULE: gateway, SERVICE: gateway, GATEWAY_MODE: public,
+                   DB_DSN: "postgresql://gateway_svc:gateway@postgres/hotel" }
+    ports: ["8007:8000"]
+
+  # ── Internal API (호텔 직원용. 실제로는 VPN 뒤) ──
+  internal-api:
+    <<: *app
+    environment: { MODULE: gateway, SERVICE: internal-api, GATEWAY_MODE: internal }
+    ports: ["8008:8000"]
+
+  hotel:
+    <<: *app
+    environment: { MODULE: hotel_svc, SERVICE: hotel, DB_DSN: "postgresql://hotel_svc:hotel@postgres/hotel" }
+
+  rate:
+    <<: *app
+    environment: { MODULE: rate_svc, SERVICE: rate, DB_DSN: "postgresql://rate_svc:rate@postgres/hotel" }
+
+  reservation:
+    <<: *app
+    environment: { MODULE: reservation_svc, SERVICE: reservation,
+                   DB_DSN: "postgresql://reservation_svc:reservation@postgres/hotel" }
+
+  payment:
+    <<: *app
+    environment: { MODULE: payment_svc, SERVICE: payment, DB_DSN: "postgresql://payment_svc:payment@postgres/hotel" }
+
+  mgmt:
+    <<: *app
+    environment: { MODULE: mgmt_svc, SERVICE: mgmt }

@@ -1,0 +1,921 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>쉼표 스테이 — 호텔 예약</title>
+<style>
+:root{
+  --bg:#f7f6f3; --card:#fff; --ink:#1c1b19; --soft:#66615b; --faint:#9c968e; --line:#e7e3dc;
+  --brand:#0f6b5c; --brand-2:#0c5649; --brand-soft:#e3f1ee; --warn:#c2410c; --bad:#b91c1c; --ok:#15803d;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --dev-bg:#15171c; --dev-card:#1d2027; --dev-line:#2c313b; --dev-ink:#e6e8ec; --dev-soft:#9aa3b2;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:15px/1.6 "Pretendard","Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif;word-break:keep-all}
+a{color:inherit}
+button{font:inherit;cursor:pointer}
+input,select{font:inherit}
+.wrap{max-width:1120px;margin:0 auto;padding:0 20px}
+
+/* 헤더 */
+.top{background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
+.top .wrap{display:flex;align-items:center;gap:18px;height:64px}
+.logo{display:flex;align-items:center;gap:8px;font-weight:800;font-size:20px;text-decoration:none;letter-spacing:-.02em}
+.logo i{display:inline-grid;place-items:center;width:30px;height:30px;border-radius:9px;background:var(--brand);color:#fff;font-style:normal;font-size:20px;line-height:1}
+.top nav{margin-left:auto;display:flex;gap:6px;align-items:center}
+.top nav a,.top nav button{border:0;background:none;padding:8px 12px;border-radius:8px;text-decoration:none;color:var(--ink)}
+.top nav a:hover,.top nav button:hover{background:var(--bg)}
+.who{display:flex;align-items:center;gap:8px}
+.avatar{width:28px;height:28px;border-radius:50%;background:var(--brand-soft);color:var(--brand);display:grid;place-items:center;font-weight:700;font-size:13px}
+
+/* 검색 */
+.hero{background:linear-gradient(135deg,#0f6b5c,#16857a 55%,#3aa58f);color:#fff;padding:44px 0 70px}
+.hero h1{margin:0 0 6px;font-size:32px;letter-spacing:-.03em}
+.hero p{margin:0;opacity:.85}
+.searchbar{background:#fff;color:var(--ink);border-radius:16px;box-shadow:0 12px 30px rgba(0,0,0,.12);padding:10px;display:grid;grid-template-columns:1.2fr 1fr 1fr .7fr auto;gap:6px;margin-top:-38px;position:relative}
+.searchbar label{display:flex;flex-direction:column;padding:6px 12px;border-radius:10px;font-size:12px;color:var(--soft)}
+.searchbar label:hover{background:var(--bg)}
+.searchbar input,.searchbar select{border:0;outline:0;background:transparent;font-size:15px;color:var(--ink);padding:2px 0}
+.btn{border:0;border-radius:10px;padding:11px 20px;font-weight:700;background:var(--brand);color:#fff}
+.btn:hover{background:var(--brand-2)}
+.btn:disabled{background:#a9b8b4;cursor:not-allowed}
+.btn.ghost{background:#fff;color:var(--ink);border:1px solid var(--line)}
+.btn.ghost:hover{background:var(--bg)}
+.btn.danger{background:#fff;color:var(--bad);border:1px solid #f1c9c9}
+.btn.sm{padding:7px 12px;font-size:13px}
+
+/* 목록 */
+.section-h{display:flex;align-items:baseline;justify-content:space-between;margin:34px 0 14px}
+.section-h h2{margin:0;font-size:21px;letter-spacing:-.02em}
+.muted{color:var(--soft)}
+.small{font-size:13px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:18px}
+.hcard{background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden;text-decoration:none;display:flex;flex-direction:column;transition:transform .15s,box-shadow .15s}
+.hcard:hover{transform:translateY(-2px);box-shadow:0 10px 24px rgba(0,0,0,.07)}
+.hcard .pic{aspect-ratio:16/9;display:block}
+.hcard .pic svg,.hero-pic svg{width:100%;height:100%;display:block}
+.hcard .body{padding:14px 16px 16px;display:flex;flex-direction:column;gap:4px;flex:1}
+.hcard h3{margin:0;font-size:17px}
+.stars{color:#d97706;font-size:13px;letter-spacing:1px}
+.price{margin-top:auto;display:flex;align-items:baseline;justify-content:flex-end;gap:6px;padding-top:10px}
+.price b{font-size:19px}
+.tag{display:inline-block;font-size:12px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--brand-soft);color:var(--brand)}
+.tag.hot{background:#fdeee4;color:var(--warn)}
+.tag.out{background:#f1f0ed;color:var(--faint)}
+
+/* 호텔 상세 */
+.hero-pic{height:300px;border-radius:18px;overflow:hidden;margin:22px 0 18px}
+.hhead{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;flex-wrap:wrap}
+.hhead h1{margin:0;font-size:28px;letter-spacing:-.03em}
+.datebox{display:flex;gap:8px;align-items:flex-end;background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px 10px}
+.datebox label{display:flex;flex-direction:column;font-size:12px;color:var(--soft)}
+.datebox input,.datebox select{border:1px solid var(--line);border-radius:8px;padding:5px 8px}
+.rooms{display:flex;flex-direction:column;gap:14px;margin:24px 0 60px}
+.room{background:#fff;border:1px solid var(--line);border-radius:16px;display:grid;grid-template-columns:200px 1fr auto;gap:18px;padding:14px;align-items:center}
+.room .thumb{height:130px;border-radius:12px;overflow:hidden}
+.room .thumb svg{width:100%;height:100%;display:block}
+.room h3{margin:0 0 4px;font-size:18px}
+.amen{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.amen span{font-size:12px;background:var(--bg);border-radius:6px;padding:2px 8px;color:var(--soft)}
+.room .buy{text-align:right;display:flex;flex-direction:column;gap:6px;align-items:flex-end;min-width:170px}
+.room .buy b{font-size:21px}
+
+/* 체크아웃 */
+.two{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:22px;margin:26px 0 60px;align-items:start}
+.panel{background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px}
+.panel h2{margin:0 0 12px;font-size:19px}
+.steps{display:flex;gap:8px;margin:26px 0 0;font-size:13px;color:var(--faint)}
+.steps span.on{color:var(--brand);font-weight:700}
+.field{display:flex;flex-direction:column;gap:4px;margin-bottom:12px;font-size:13px;color:var(--soft)}
+.field input{border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:15px;color:var(--ink)}
+.row{display:flex;justify-content:space-between;gap:10px;padding:5px 0}
+.row.total{border-top:1px solid var(--line);margin-top:8px;padding-top:12px;font-size:18px;font-weight:800}
+.notice{border-radius:12px;padding:12px 14px;font-size:14px;margin:12px 0}
+.notice.err{background:#fdecec;color:var(--bad)}
+.notice.info{background:var(--brand-soft);color:var(--brand-2)}
+.notice.warn{background:#fff4e5;color:#9a4b00}
+.rid{font-family:var(--mono);font-size:12px;color:var(--faint)}
+.big-status{text-align:center;padding:40px 20px}
+.big-status .ic{font-size:54px}
+.big-status h1{margin:8px 0 4px}
+
+/* 내 예약 */
+.trip{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px;display:grid;grid-template-columns:120px 1fr auto;gap:16px;align-items:center;margin-bottom:12px}
+.trip .thumb{height:80px;border-radius:10px;overflow:hidden}
+.trip .thumb svg{width:100%;height:100%}
+.st{display:inline-block;font-size:12px;font-weight:700;padding:2px 9px;border-radius:999px}
+.st.pending{background:#fff4e5;color:#9a4b00}.st.paid{background:#e4f5ea;color:var(--ok)}
+.st.rejected,.st.cancelled{background:#f1f0ed;color:var(--soft)}.st.refunded{background:#e8eefc;color:#1d4ed8}
+
+/* 모달 */
+.modal-bg{position:fixed;inset:0;background:rgba(20,20,20,.45);display:none;place-items:center;z-index:60}
+.modal-bg.open{display:grid}
+.modal{background:#fff;border-radius:18px;padding:24px;width:min(400px,92vw)}
+.modal h2{margin:0 0 4px}
+.guest-list{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}
+.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#222;color:#fff;border-radius:10px;padding:10px 16px;font-size:14px;z-index:70;opacity:0;transition:opacity .2s;pointer-events:none}
+.toast.on{opacity:1}
+
+footer{color:var(--faint);font-size:12px;padding:30px 0 80px;border-top:1px solid var(--line);margin-top:40px}
+
+/* ───────── 개발자 패널 ───────── */
+.dev-toggle{position:fixed;right:18px;bottom:18px;z-index:50;border:0;border-radius:999px;background:var(--dev-bg);color:#fff;padding:11px 16px;font:700 13px var(--mono);box-shadow:0 8px 20px rgba(0,0,0,.25);display:flex;gap:8px;align-items:center}
+.dev-toggle .dot{width:8px;height:8px;border-radius:50%;background:#4ade80}
+.dev-toggle .dot.off{background:#f87171}
+.dev{position:fixed;top:0;right:0;bottom:0;width:min(600px,100vw);background:var(--dev-bg);color:var(--dev-ink);z-index:55;transform:translateX(100%);transition:transform .2s;display:flex;flex-direction:column;font-size:13px;visibility:hidden}
+.dev.open{transform:none;visibility:visible;box-shadow:-10px 0 30px rgba(0,0,0,.25)}
+body.dev-open{padding-right:min(600px,100vw)}
+@media (max-width:1100px){body.dev-open{padding-right:0}}
+@media (max-width:1560px){body.dev-open .two{grid-template-columns:minmax(0,1fr)}body.dev-open .room{grid-template-columns:150px 1fr}body.dev-open .room .buy{grid-column:1/-1;flex-direction:row;align-items:center;justify-content:flex-end;flex-wrap:wrap}}
+.dev-head{display:flex;align-items:center;gap:6px;padding:10px 12px;border-bottom:1px solid var(--dev-line)}
+.dev-head b{font-family:var(--mono);margin-right:6px}
+.dev-tabs{display:flex;gap:2px}
+.dev-tabs button{border:0;background:none;color:var(--dev-soft);padding:6px 10px;border-radius:7px;font-size:13px}
+.dev-tabs button.on{background:var(--dev-card);color:#fff}
+.dev-close{margin-left:auto;border:0;background:none;color:var(--dev-soft);font-size:20px}
+.dev-body{flex:1;overflow:auto;padding:12px}
+.dev-pane{display:none}.dev-pane.on{display:block}
+.dev .bar{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+.dev .dbtn{border:1px solid var(--dev-line);background:var(--dev-card);color:var(--dev-ink);border-radius:7px;padding:5px 10px;font-size:12px}
+.dev .dbtn:hover{border-color:#4b5563}
+.dev .dbtn.pri{background:#0f6b5c;border-color:#0f6b5c;color:#fff}
+.dev .dbtn.red{background:#7f1d1d;border-color:#7f1d1d;color:#fff}
+.dev label.chk{display:flex;gap:6px;align-items:center;color:var(--dev-soft)}
+.dev select,.dev input[type=number],.dev input[type=date]{background:var(--dev-card);color:var(--dev-ink);border:1px solid var(--dev-line);border-radius:6px;padding:4px 6px;font-size:12px}
+.dev h4{margin:16px 0 8px;font-size:13px;color:#fff}
+.dev p.hint{color:var(--dev-soft);margin:4px 0 10px;line-height:1.55}
+.dev code{font-family:var(--mono);font-size:12px;color:#fcd34d}
+
+.trace{background:var(--dev-card);border:1px solid var(--dev-line);border-radius:10px;margin-bottom:8px;overflow:hidden}
+.trace-h{display:flex;gap:8px;align-items:center;padding:8px 10px;cursor:pointer}
+.trace-h .t{font-family:var(--mono);font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.trace-h .s{font-family:var(--mono);font-size:11px;padding:1px 6px;border-radius:5px;background:#2d3340}
+.trace-h .s.ok{color:#86efac}.trace-h .s.bad{color:#fca5a5}
+.trace-b{display:none;border-top:1px solid var(--dev-line);padding:6px 0}
+.trace.open .trace-b{display:block}
+.ev{display:grid;grid-template-columns:46px 88px 1fr;gap:6px;padding:3px 10px;align-items:start}
+.ev .ms{font-family:var(--mono);font-size:11px;color:#6b7280;text-align:right;padding-top:2px}
+.svc{font:700 10.5px var(--mono);padding:2px 6px;border-radius:5px;text-align:center;white-space:nowrap}
+.svc.gateway{background:#374151;color:#e5e7eb}.svc.internal-api{background:#4b5563;color:#fff}
+.svc.hotel{background:#1e3a8a;color:#bfdbfe}.svc.rate{background:#4c1d95;color:#ddd6fe}
+.svc.reservation{background:#7c2d12;color:#fed7aa}.svc.payment{background:#14532d;color:#bbf7d0}
+.svc.mgmt{background:#713f12;color:#fde68a}
+.ev .x{font-size:12.5px;line-height:1.5;word-break:break-all}
+.ev pre{margin:0;font:12px/1.45 var(--mono);white-space:pre-wrap;color:#d1d5db;background:#12141a;border-radius:6px;padding:5px 7px}
+.ev .meta{font:11px var(--mono);color:#6b7280}
+.ev.err .x,.ev.err pre{color:#fca5a5}
+.ev.k-state .x{color:#fcd34d;font-weight:700}
+.ev.k-idem .x{color:#f9a8d4;font-weight:700}
+.ev.k-check .x.ok{color:#86efac}.ev.k-check .x.no{color:#fca5a5;font-weight:700}
+.ev.k-tx .x{color:#93c5fd;font:700 12px var(--mono)}
+.ev.k-cache .x{color:#67e8f9}
+.ev.k-id .x{color:#c4b5fd;font-weight:700}
+
+.dtable{width:100%;border-collapse:collapse;font-size:12px}
+.dtable th,.dtable td{border-bottom:1px solid var(--dev-line);padding:5px 6px;text-align:right;font-family:var(--mono)}
+.dtable th{color:var(--dev-soft);font-weight:500;position:sticky;top:0;background:var(--dev-bg)}
+.dtable td.l,.dtable th.l{text-align:left}
+.dtable tr.over td{background:rgba(220,38,38,.18)}
+.dtable tr.diff td.c{background:rgba(234,179,8,.25);color:#fde68a}
+.dtable tr.flash td{animation:fl 1s}
+@keyframes fl{from{background:rgba(74,222,128,.35)}to{background:transparent}}
+.pill{font:700 10.5px var(--mono);padding:1px 6px;border-radius:5px}
+.pill.pending{background:#78350f;color:#fde68a}.pill.paid{background:#14532d;color:#bbf7d0}
+.pill.rejected,.pill.cancelled{background:#374151;color:#d1d5db}.pill.refunded{background:#1e3a8a;color:#bfdbfe}
+.pill.charged{background:#14532d;color:#bbf7d0}.pill.failed{background:#7f1d1d;color:#fecaca}
+
+.card{background:var(--dev-card);border:1px solid var(--dev-line);border-radius:10px;padding:12px;margin-bottom:10px}
+.card .ttl{font-weight:700;color:#fff;margin-bottom:4px;display:flex;justify-content:space-between;gap:8px}
+.card .ttl small{color:var(--dev-soft);font-weight:400}
+.card ol{margin:6px 0 8px;padding-left:18px;color:var(--dev-soft);line-height:1.6}
+.opt{display:grid;grid-template-columns:130px 1fr;gap:8px;align-items:center;padding:5px 0;border-bottom:1px dashed var(--dev-line)}
+.opt>span{color:var(--dev-soft)}
+.locks{display:flex;flex-direction:column;gap:4px}
+.locks label{display:flex;gap:8px;align-items:flex-start;padding:6px 8px;border-radius:7px;border:1px solid transparent}
+.locks label.on{border-color:#0f6b5c;background:rgba(15,107,92,.18)}
+.locks small{display:block;color:var(--dev-soft)}
+.result{font-family:var(--mono);font-size:12px;background:#12141a;border-radius:8px;padding:8px;margin-top:8px;white-space:pre-wrap}
+
+#arch svg{width:100%;height:auto}
+#arch .nd rect{fill:#1d2027;stroke:#3a404c;stroke-width:1.2;rx:8}
+#arch .nd text{fill:#e6e8ec;font:600 11.5px system-ui;text-anchor:middle}
+#arch .nd text.sub{fill:#8b93a3;font:500 9.5px system-ui}
+#arch .nd.flash rect{stroke:#fbbf24;stroke-width:2.5;fill:#3a2f12}
+#arch .eg{stroke:#3a404c;stroke-width:1.4;fill:none}
+#arch .eg.flash{stroke:#fbbf24;stroke-width:3}
+#arch .grp{fill:none;stroke:#4b5563;stroke-dasharray:4 3;rx:10}
+#arch .glabel{fill:#8b93a3;font:600 10px system-ui}
+.arch-legend{color:var(--dev-soft);font-size:12px;line-height:1.6}
+.counters{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px}
+.counters div{background:var(--dev-card);border:1px solid var(--dev-line);border-radius:8px;padding:6px 8px}
+.counters b{display:block;font:700 16px var(--mono);color:#fff}
+.counters span{color:var(--dev-soft);font-size:11px}
+
+@media (max-width:820px){
+  .searchbar{grid-template-columns:1fr 1fr}
+  .room{grid-template-columns:1fr}.room .buy{align-items:flex-start;text-align:left}
+  .two{grid-template-columns:1fr}
+  .trip{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <a class="logo" href="#/"><i>,</i>쉼표 스테이</a>
+  <nav>
+    <a href="#/trips">내 예약</a>
+    <span id="who"></span>
+  </nav>
+</div></header>
+
+<main id="app"></main>
+
+<div class="wrap"><footer>쉼표 스테이는 「가상 면접 사례로 배우는 대규모 시스템 설계 기초 2」 7장 학습용 데모입니다. 실제 결제는 일어나지 않습니다.</footer></div>
+
+<!-- 로그인 -->
+<div class="modal-bg" id="login"><div class="modal">
+  <h2>로그인</h2>
+  <div class="muted small">이 탭에서만 로그인됩니다. 탭마다 다른 사람으로 로그인해 동시에 예약해 보세요.</div>
+  <div class="guest-list" id="guest-list"></div>
+  <div class="field"><span>또는 새 이름</span><input id="login-name" placeholder="예: 최하늘" maxlength="20"></div>
+  <div style="display:flex;gap:8px;justify-content:flex-end">
+    <button class="btn ghost" onclick="closeLogin()">닫기</button>
+    <button class="btn" onclick="login(document.getElementById('login-name').value)">로그인</button>
+  </div>
+</div></div>
+<div class="toast" id="toast"></div>
+
+<!-- 개발자 패널 -->
+<button class="dev-toggle" onclick="toggleDev()"><span class="dot off" id="sse-dot"></span>&lt;/&gt; 개발자</button>
+<aside class="dev" id="dev">
+  <div class="dev-head">
+    <b>&lt;/&gt;</b>
+    <div class="dev-tabs" id="dev-tabs">
+      <button data-t="flow" class="on">흐름</button>
+      <button data-t="arch">구조</button>
+      <button data-t="inv">재고</button>
+      <button data-t="res">예약</button>
+      <button data-t="lab">실험</button>
+    </div>
+    <button class="dev-close" onclick="toggleDev()">×</button>
+  </div>
+  <div class="dev-body">
+    <!-- 흐름 -->
+    <div class="dev-pane on" id="p-flow">
+      <div class="bar">
+        <label class="chk"><input type="checkbox" id="only-mine"> 이 탭 요청만</label>
+        <label class="chk"><input type="checkbox" id="hide-get" checked> 조회(GET) 접기</label>
+        <button class="dbtn" onclick="clearTraces()" style="margin-left:auto">지우기</button>
+      </div>
+      <div id="traces"></div>
+    </div>
+    <!-- 구조 -->
+    <div class="dev-pane" id="p-arch">
+      <div id="arch"></div>
+      <div class="counters" id="counters"></div>
+      <p class="arch-legend">교재 그림 4·5의 구성을 그대로 컨테이너로 띄웠습니다. 요청이 지나가면 그 상자와 선이 노랗게 깜빡입니다.
+        PostgreSQL 은 인스턴스 하나지만 서비스마다 <b>스키마와 계정</b>을 따로 둬서, 다른 서비스의 테이블은 읽지도 쓰지도 못합니다.
+        샤딩은 하지 않았습니다(<code>hash(hotel_id) % N</code>, 여기서는 N = 1).</p>
+    </div>
+    <!-- 재고 -->
+    <div class="dev-pane" id="p-inv">
+      <div class="bar">
+        <select id="inv-hotel"></select>
+        <select id="inv-type"></select>
+        <input type="date" id="inv-start">
+        <button class="dbtn" onclick="loadInv()">새로고침</button>
+      </div>
+      <p class="hint"><code>room_type_inventory</code> 행(DB)과 Redis 캐시 값을 나란히 봅니다. 한도 = total_inventory × (100 + 초과 예약%) 내림.
+        <span style="color:#fde68a">노란 칸</span>은 캐시와 DB가 다른 곳, <span style="color:#fca5a5">빨간 줄</span>은 한도를 넘겨 판 날(이중 예약)입니다.</p>
+      <table class="dtable" id="inv-table"></table>
+    </div>
+    <!-- 예약 -->
+    <div class="dev-pane" id="p-res">
+      <h4 style="margin-top:0">reservation.reservation <small class="muted">· 상태 이력 포함</small></h4>
+      <table class="dtable" id="res-table"></table>
+      <h4>payment.payment</h4>
+      <table class="dtable" id="pay-table"></table>
+    </div>
+    <!-- 실험 -->
+    <div class="dev-pane" id="p-lab">
+      <div class="card">
+        <div class="ttl">동시성 제어 방식 <small>교재 그림 11~14</small></div>
+        <div class="locks" id="locks"></div>
+      </div>
+      <div class="card">
+        <div class="ttl">설정</div>
+        <div class="opt"><span>경쟁 구간</span><select data-cfg="race_ms"><option value="0">0ms (실제처럼)</option><option value="200">200ms</option><option value="500">500ms</option><option value="1500">1500ms</option></select></div>
+        <div class="opt"><span>초과 예약</span><select data-cfg="overbook_pct"><option value="0">0%</option><option value="10">10% (교재)</option></select></div>
+        <div class="opt"><span>캐시 반영 지연</span><select data-cfg="cache_sync_ms"><option value="0">즉시</option><option value="3000">3초</option><option value="10000">10초</option><option value="30000">30초</option></select></div>
+        <div class="opt"><span>캐시로 미리 거르기</span><label class="chk"><input type="checkbox" data-cfg="cache_filter"> 캐시가 빈방 없음이면 DB 까지 가지 않음</label></div>
+        <div class="opt"><span>결제(PG)</span><select data-cfg="pay_mode"><option value="success">성공</option><option value="fail">승인 거절</option><option value="slow">4초 지연</option><option value="lost_notify">결제 후 알림 유실</option></select></div>
+        <div class="opt"><span>결제 대기 한도</span><select data-cfg="pending_timeout_s"><option value="30">30초</option><option value="60">1분</option><option value="180">3분</option><option value="600">10분</option></select></div>
+        <div class="opt" style="border:0"><span>버튼 중복 클릭</span><label class="chk"><input type="checkbox" data-cfg="client_guard"> 누르면 버튼 잠그기 (클라이언트 측 방지)</label></div>
+      </div>
+
+      <div class="card">
+        <div class="ttl">① 마지막 방을 여러 명이 동시에 <small>경쟁 조건 · 그림 11</small></div>
+        <ol><li>지금 보고 있는 호텔·객실 유형·날짜(재고 탭 선택)의 남은 객실을 <b>1개</b>로 만들고</li>
+          <li>봇 N명이 각자 예약창을 연 뒤 <b>동시에</b> "예약 완료"를 누릅니다.</li></ol>
+        <p class="hint">잠금 없음 + 경쟁 구간 500ms 로 먼저 해 보고, 락 방식을 바꿔 가며 다시 해 보세요.</p>
+        <div class="bar">봇 <input type="number" id="race-n" value="5" min="2" max="20" style="width:56px"> 명
+          <button class="dbtn pri" onclick="raceLastRoom()">동시 예약 실행</button></div>
+        <div class="result" id="race-out" hidden></div>
+      </div>
+
+      <div class="card">
+        <div class="ttl">② 같은 사람이 버튼을 두 번 <small>멱등 키 · 그림 7·10</small></div>
+        <ol><li>위 설정에서 <b>버튼 중복 클릭</b>을 끄고</li><li>예약창에서 "예약 완료"를 빠르게 두 번 누릅니다.</li></ol>
+        <p class="hint">요청은 두 번 가지만 같은 <code>reservation_id</code> 라서 두 번째는 기본 키 유니크 제약에 걸립니다. 흐름 탭에서 확인하세요.</p>
+        <button class="dbtn" onclick="setCfg({client_guard:'0'})">중복 클릭 방지 끄기</button>
+      </div>
+
+      <div class="card">
+        <div class="ttl">③ 캐시와 DB가 어긋날 때 <small>그림 16</small></div>
+        <ol><li>캐시 반영 지연을 <b>10초</b>로 두고, 탭 두 개를 다른 사람으로 엽니다.</li>
+          <li>남은 객실 1개인 방을 탭 A에서 예약 → 탭 B는 10초 동안 여전히 "1개 남음"을 봅니다.</li>
+          <li>탭 B가 예약하면 캐시는 통과하지만 DB 가 최종 검사에서 막습니다.</li></ol>
+        <div class="bar"><button class="dbtn" onclick="setCfg({cache_sync_ms:'10000'})">지연 10초로</button>
+          <button class="dbtn" onclick="lastRoomOnly()">지금 방을 1개 남기기</button></div>
+      </div>
+
+      <div class="card">
+        <div class="ttl">④ 결제는 됐는데 알림이 사라지면 <small>서비스 간 일관성 · 그림 19</small></div>
+        <ol><li>결제를 <b>결제 후 알림 유실</b>, 결제 대기 한도를 <b>30초</b>로 두고 예약·결제합니다.</li>
+          <li>돈은 빠져나갔는데 예약은 pending → 30초 뒤 만료되어 cancelled.</li>
+          <li>결제를 <b>성공</b>으로 되돌리면 Payment Service 가 알림을 다시 보내고, 예약이 이미 끝났으니 <b>보상 트랜잭션으로 환불</b>합니다.</li></ol>
+        <div class="bar"><button class="dbtn" onclick="setCfg({pay_mode:'lost_notify',pending_timeout_s:'30'})">알림 유실 + 30초</button>
+          <button class="dbtn" onclick="setCfg({pay_mode:'success'})">결제 성공으로 되돌리기</button></div>
+      </div>
+
+      <div class="card">
+        <div class="ttl">⑤ 서비스 경계 <small>그림 17</small></div>
+        <p class="hint">Payment Service 계정으로 <code>reservation.reservation</code> 을 직접 UPDATE 해 봅니다. 스키마 권한이 없어 막힙니다. 그래서 결제 결과는 API 로 알려야 하고, 한 트랜잭션으로 묶을 수 없습니다.</p>
+        <button class="dbtn" onclick="crossSchema()">직접 UPDATE 시도</button>
+        <div class="result" id="cross-out" hidden></div>
+      </div>
+
+      <div class="card">
+        <div class="ttl">초기화</div>
+        <p class="hint">예약·결제를 모두 지우고 재고를 처음 상태로 되돌립니다. 설정은 유지됩니다.</p>
+        <button class="dbtn red" onclick="resetAll()">데이터 초기화</button>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<script>
+/* ═════════ 공통 ═════════ */
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const won = n => Number(n).toLocaleString("ko-KR") + "원";
+const TAB = Math.random().toString(36).slice(2, 6);
+let seq = 0;
+const ymd = d => { const z = new Date(d.getTime() - d.getTimezoneOffset() * 6e4); return z.toISOString().slice(0, 10); };
+const addDays = (s, n) => { const d = new Date(s + "T00:00:00"); d.setDate(d.getDate() + n); return ymd(d); };
+const nightsOf = (a, b) => Math.round((new Date(b) - new Date(a)) / 864e5);
+const fmtD = s => { const d = new Date(s + "T00:00:00"); return `${d.getMonth() + 1}월 ${d.getDate()}일 (${"일월화수목금토"[d.getDay()]})`; };
+
+const auth = {
+  get token() { return sessionStorage.getItem("token"); },
+  get guest() { try { return JSON.parse(sessionStorage.getItem("guest")); } catch { return null; } },
+};
+
+async function api(method, path, body, opt = {}) {
+  const headers = {"content-type": "application/json", "x-trace-id": `${opt.dev ? "dev-" : ""}${TAB}-${++seq}`};
+  const tok = opt.token ?? auth.token;
+  if (tok) headers.authorization = "Bearer " + tok;
+  const r = await fetch(path, {method, headers, body: body ? JSON.stringify(body) : undefined});
+  let data = null;
+  try { data = await r.json(); } catch {}
+  return {ok: r.ok, status: r.status, data};
+}
+
+function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("on"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("on"), 2600); }
+
+let CFG = {};
+async function loadCfg() { CFG = (await api("GET", "/dev/cfg", null, {dev: 1})).data || {}; renderLab(); }
+
+/* ═════════ 그림 (호텔 풍경) ═════════ */
+const HUE = {river: 205, city: 25, sea: 195, island: 140, forest: 160};
+function scene(kind, seed = 1) {
+  const h = HUE[kind] ?? 200;
+  const sky = `<defs><linearGradient id="g${kind}${seed}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="hsl(${h},60%,78%)"/><stop offset="1" stop-color="hsl(${h + 20},70%,92%)"/></linearGradient></defs>
+    <rect width="320" height="180" fill="url(#g${kind}${seed})"/><circle cx="${250 - seed * 30}" cy="46" r="18" fill="hsl(40,95%,70%)" opacity=".9"/>`;
+  let fg = "";
+  const bld = (x, w, ht, c) => { let s = `<rect x="${x}" y="${180 - ht}" width="${w}" height="${ht}" fill="${c}"/>`;
+    for (let y = 180 - ht + 8; y < 168; y += 12) for (let xx = x + 5; xx < x + w - 6; xx += 10) s += `<rect x="${xx}" y="${y}" width="4" height="5" fill="hsl(45,90%,80%)" opacity="${(xx * y + seed) % 3 ? .55 : .15}"/>`; return s; };
+  if (kind === "river" || kind === "city") {
+    const base = kind === "river" ? 130 : 180;
+    [[10, 34, 70], [48, 26, 104], [78, 40, 86], [124, 30, 122], [158, 46, 92], [208, 28, 136], [240, 38, 100], [282, 34, 78]]
+      .forEach(([x, w, ht], i) => fg += bld(x, w, ht * (kind === "city" ? 1.1 : .85) - (180 - base) * 0, `hsl(${h + 180},${12 + i % 3 * 4}%,${30 + i % 4 * 6}%)`));
+    if (kind === "river") fg += `<rect y="130" width="320" height="50" fill="hsl(${h},55%,48%)"/><path d="M0 142h320M0 156h320M0 170h320" stroke="#fff" stroke-opacity=".25"/>
+      <path d="M0 128 Q80 108 160 128 T320 128" stroke="hsl(0,0%,95%)" stroke-width="3" fill="none"/>`;
+    else fg += `<rect y="168" width="320" height="12" fill="hsl(30,10%,35%)"/>`;
+  } else if (kind === "sea") {
+    [[150, 22, 118], [176, 18, 140], [198, 26, 104], [230, 20, 126], [254, 30, 92]].forEach(([x, w, ht], i) => fg += bld(x, w, ht * .7 + 40, `hsl(210,14%,${36 + i * 5}%)`));
+    fg += `<rect y="120" width="320" height="60" fill="hsl(${h},70%,45%)"/><path d="M0 132q20-6 40 0t40 0 40 0 40 0 40 0 40 0 40 0 40 0M0 150q20-6 40 0t40 0 40 0 40 0 40 0 40 0 40 0 40 0" stroke="#fff" stroke-opacity=".5" fill="none" stroke-width="2"/>
+      <path d="M0 168h320v12H0z" fill="hsl(45,60%,78%)"/>`;
+  } else if (kind === "island") {
+    fg += `<path d="M0 130 Q100 40 170 52 Q240 64 320 128 V180H0z" fill="hsl(${h},28%,42%)"/><path d="M150 56 Q170 46 190 58" stroke="#fff" stroke-width="5" fill="none" opacity=".8"/>
+      <path d="M0 150 Q160 118 320 148 V180H0z" fill="hsl(${h},40%,55%)"/>`;
+    for (let x = 6; x < 320; x += 18) fg += `<ellipse cx="${x}" cy="170" rx="10" ry="7" fill="hsl(220,8%,${24 + (x % 3) * 5}%)"/>`;
+    for (let x = 30; x < 300; x += 46) fg += `<circle cx="${x}" cy="152" r="5" fill="hsl(30,95%,55%)"/>`;
+  } else {
+    fg += `<rect y="118" width="320" height="22" fill="hsl(200,60%,55%)"/><rect y="140" width="320" height="40" fill="hsl(45,45%,75%)"/>`;
+    for (let x = 0; x < 330; x += 26) { const t = 70 + (x * 7 + seed * 13) % 40;
+      fg += `<rect x="${x + 9}" y="${180 - t * .5}" width="4" height="${t * .5}" fill="hsl(25,35%,30%)"/><path d="M${x} ${185 - t * .5} L${x + 11} ${180 - t} L${x + 22} ${185 - t * .5}z" fill="hsl(${h},40%,${26 + (x / 26) % 3 * 6}%)"/>`; }
+  }
+  return `<svg viewBox="0 0 320 180" preserveAspectRatio="xMidYMid slice">${sky}${fg}</svg>`;
+}
+function roomPic(kind, idx) {
+  const h = HUE[kind] ?? 200, wall = `hsl(${h + idx * 25},25%,${86 - idx * 4}%)`;
+  return `<svg viewBox="0 0 200 130" preserveAspectRatio="xMidYMid slice"><rect width="200" height="130" fill="${wall}"/>
+    <rect x="118" y="14" width="64" height="52" rx="3" fill="hsl(${h},55%,75%)" stroke="#fff" stroke-width="4"/><path d="M118 52 L140 36 L160 48 L182 30 V66H118z" fill="hsl(${h},35%,55%)" opacity=".7"/>
+    <rect y="100" width="200" height="30" fill="hsl(30,25%,62%)"/>
+    <rect x="18" y="58" width="${idx === 2 ? 110 : 92}" height="16" rx="4" fill="hsl(30,30%,40%)"/>
+    <rect x="18" y="70" width="${idx === 2 ? 110 : 92}" height="30" rx="4" fill="#fff"/><rect x="18" y="80" width="${idx === 2 ? 110 : 92}" height="20" rx="3" fill="hsl(${h},45%,60%)"/>
+    <rect x="24" y="62" width="26" height="12" rx="5" fill="#f4f1ec"/><rect x="56" y="62" width="26" height="12" rx="5" fill="#f4f1ec"/>
+    ${idx === 1 ? `<rect x="8" y="78" width="6" height="22" fill="hsl(30,30%,40%)"/>` : ""}
+    <circle cx="150" cy="86" r="7" fill="hsl(130,35%,40%)"/><rect x="147" y="90" width="6" height="12" fill="hsl(25,40%,35%)"/></svg>`;
+}
+
+/* ═════════ 라우팅 ═════════ */
+let HOTELS = null;
+async function hotels() { if (!HOTELS) HOTELS = (await api("GET", "/api/v1/hotels")).data || []; return HOTELS; }
+const CTX = {hotel: 1, type: 101, in: null, out: null};   // 개발자 패널이 따라가는 "지금 보는 방"
+
+function parseHash() {
+  const [p, q] = location.hash.slice(1).split("?");
+  return {parts: (p || "/").split("/").filter(Boolean), q: new URLSearchParams(q || "")};
+}
+function defaults(q) {
+  const tin = q.get("in") || addDays(ymd(new Date()), 7);
+  let tout = q.get("out") || addDays(tin, 2);
+  if (tout <= tin) tout = addDays(tin, 1);
+  return {city: q.get("city") || "", in: tin, out: tout, rooms: +(q.get("rooms") || 1)};
+}
+async function route() {
+  const {parts, q} = parseHash();
+  const app = $("#app");
+  window.scrollTo(0, 0);
+  clearInterval(window._poll);
+  renderWho();
+  try {
+    if (!parts.length) await pageHome(app, defaults(q));
+    else if (parts[0] === "hotel") await pageHotel(app, +parts[1], defaults(q));
+    else if (parts[0] === "checkout") await pageCheckout(app, parts[1]);
+    else if (parts[0] === "pay") await pagePay(app, parts[1]);
+    else if (parts[0] === "done") await pageDone(app, parts[1]);
+    else if (parts[0] === "trips") await pageTrips(app);
+    else app.innerHTML = `<div class="wrap"><p>페이지가 없습니다.</p></div>`;
+  } catch (e) { app.innerHTML = `<div class="wrap"><div class="notice err">문제가 생겼습니다: ${esc(e.message)}</div></div>`; }
+}
+addEventListener("hashchange", route);
+
+/* ═════════ 로그인 ═════════ */
+function renderWho() {
+  const g = auth.guest;
+  $("#who").innerHTML = g
+    ? `<span class="who"><span class="avatar">${esc(g.name[0])}</span>${esc(g.name)} <button onclick="logout()">로그아웃</button></span>`
+    : `<button onclick="openLogin()">로그인</button>`;
+}
+let afterLogin = null;
+async function openLogin(cb) {
+  afterLogin = cb || null;
+  const gs = (await api("GET", "/api/auth/guests")).data || [];
+  $("#guest-list").innerHTML = gs.map(g => `<button class="btn ghost sm" onclick="login('${esc(g.name)}')">${esc(g.name)}</button>`).join("");
+  $("#login").classList.add("open");
+}
+function closeLogin() { $("#login").classList.remove("open"); }
+async function login(name) {
+  const r = await api("POST", "/api/auth/login", {name});
+  if (!r.ok) return toast(r.data?.message || "로그인 실패");
+  sessionStorage.setItem("token", r.data.token);
+  sessionStorage.setItem("guest", JSON.stringify(r.data.guest));
+  closeLogin(); renderWho(); toast(`${r.data.guest.name}님, 반갑습니다`);
+  if (afterLogin) { const f = afterLogin; afterLogin = null; f(); }
+}
+function logout() { sessionStorage.removeItem("token"); sessionStorage.removeItem("guest"); renderWho(); location.hash = "#/"; }
+function needLogin(cb) { if (auth.token) return cb(); openLogin(cb); }
+
+/* ═════════ 페이지: 홈 ═════════ */
+async function pageHome(app, s) {
+  const hs = await hotels();
+  const cities = [...new Set(hs.map(h => h.city))];
+  app.innerHTML = `
+  <section class="hero"><div class="wrap"><h1>어디로 쉬러 가세요?</h1><p>전국 ${hs.length}곳의 호텔 · 날짜별 실시간 요금과 남은 객실</p></div></section>
+  <div class="wrap">
+    <form class="searchbar" id="sf">
+      <label>지역<select name="city"><option value="">전체</option>${cities.map(c => `<option ${c === s.city ? "selected" : ""}>${c}</option>`).join("")}</select></label>
+      <label>체크인<input type="date" name="in" value="${s.in}" min="${ymd(new Date())}"></label>
+      <label>체크아웃<input type="date" name="out" value="${s.out}"></label>
+      <label>객실 수<select name="rooms">${[1, 2, 3].map(n => `<option ${n === s.rooms ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+      <button class="btn">검색</button>
+    </form>
+    <div class="section-h"><h2>${s.city || "전체"} · ${fmtD(s.in)} – ${fmtD(s.out)}</h2><span class="muted small">${nightsOf(s.in, s.out)}박 · 객실 ${s.rooms}개</span></div>
+    <div class="grid" id="list">${hs.filter(h => !s.city || h.city === s.city).map(h => `
+      <a class="hcard" href="#/hotel/${h.hotel_id}?in=${s.in}&out=${s.out}&rooms=${s.rooms}">
+        <span class="pic">${scene(h.scene, h.hotel_id)}</span>
+        <div class="body"><span class="stars">${"★".repeat(h.stars)}</span><h3>${esc(h.name)}</h3>
+          <span class="muted small">${esc(h.address)}</span>
+          <span id="av-${h.hotel_id}"></span>
+          <div class="price"><span class="muted small">${nightsOf(s.in, s.out)}박 최저</span><b id="pr-${h.hotel_id}">…</b></div></div>
+      </a>`).join("")}</div>
+  </div>`;
+  $("#sf").onsubmit = e => { e.preventDefault(); const f = new FormData(e.target);
+    location.hash = `#/?city=${f.get("city")}&in=${f.get("in")}&out=${f.get("out")}&rooms=${f.get("rooms")}`; };
+  const [rates, inv] = await Promise.all([
+    api("GET", `/api/v1/rates/hotels?start=${s.in}&end=${s.out}`), api("GET", `/api/v1/inventory/hotels?start=${s.in}&end=${s.out}`)]);
+  for (const h of hs) {
+    const pr = $(`#pr-${h.hotel_id}`); if (!pr) continue;
+    const types = h.room_types.filter(t => (inv.data?.[h.hotel_id]?.[t.room_type_id] ?? 0) >= s.rooms);
+    const ps = types.map(t => rates.data?.[t.room_type_id]).filter(Boolean);
+    pr.textContent = ps.length ? won(Math.min(...ps) * s.rooms) : "–";
+    $(`#av-${h.hotel_id}`).innerHTML = !types.length ? `<span class="tag out">예약 마감</span>`
+      : types.length < h.room_types.length ? `<span class="tag hot">일부 객실 마감</span>` : `<span class="tag">예약 가능</span>`;
+  }
+}
+
+/* ═════════ 페이지: 호텔 ═════════ */
+async function pageHotel(app, id, s) {
+  const [h, rates, inv] = await Promise.all([
+    api("GET", `/api/v1/hotels/${id}`), api("GET", `/api/v1/rates/hotels?hotel_id=${id}&start=${s.in}&end=${s.out}`),
+    api("GET", `/api/v1/inventory?hotel_id=${id}&start=${s.in}&end=${s.out}`)]);
+  if (!h.ok) throw new Error(h.data?.message || "호텔을 불러오지 못했습니다");
+  const H = h.data, n = nightsOf(s.in, s.out);
+  Object.assign(CTX, {hotel: id, in: s.in, out: s.out}); if (!H.room_types.some(t => t.room_type_id === CTX.type)) CTX.type = H.room_types[0].room_type_id;
+  syncInvSelectors();
+  app.innerHTML = `<div class="wrap">
+    <div class="hero-pic">${scene(H.scene, H.hotel_id)}</div>
+    <div class="hhead"><div><span class="stars">${"★".repeat(H.stars)}</span><h1>${esc(H.name)}</h1>
+      <div class="muted">${esc(H.address)}</div><p style="max-width:640px">${esc(H.description)}</p></div>
+      <form class="datebox" id="df">
+        <label>체크인<input type="date" name="in" value="${s.in}" min="${ymd(new Date())}"></label>
+        <label>체크아웃<input type="date" name="out" value="${s.out}"></label>
+        <label>객실<select name="rooms">${[1, 2, 3].map(x => `<option ${x === s.rooms ? "selected" : ""}>${x}</option>`).join("")}</select></label>
+        <button class="btn sm">변경</button></form></div>
+    <div class="section-h"><h2>객실 선택</h2><span class="muted small">${fmtD(s.in)} – ${fmtD(s.out)} · ${n}박 · 세금 포함</span></div>
+    <div id="msg"></div>
+    <div class="rooms">${H.room_types.map((t, i) => {
+      const left = inv.data?.[t.room_type_id] ?? 0, price = rates.data?.[t.room_type_id];
+      const can = left >= s.rooms && price;
+      return `<div class="room">
+        <div class="thumb">${roomPic(H.scene, i)}</div>
+        <div><h3>${esc(t.name)}</h3><div class="muted small">${esc(t.beds)} · ${t.size_m2}㎡ · 최대 ${t.capacity}명</div>
+          <div class="amen">${t.amenities.map(a => `<span>${esc(a)}</span>`).join("")}</div></div>
+        <div class="buy">
+          ${left <= 0 ? `<span class="tag out">예약 마감</span>` : left <= 3 ? `<span class="tag hot">남은 객실 ${left}개</span>` : `<span class="tag">예약 가능</span>`}
+          ${price ? `<b>${won(price * s.rooms)}</b><span class="muted small">1박 평균 ${won(Math.round(price / n))}</span>` : `<span class="muted">요금 없음</span>`}
+          <button class="btn" ${can ? "" : "disabled"} onclick="choose(${id},${t.room_type_id},'${s.in}','${s.out}',${s.rooms},this)">${can ? "예약하기" : "선택 불가"}</button>
+        </div></div>`; }).join("")}</div></div>`;
+  $("#df").onsubmit = e => { e.preventDefault(); const f = new FormData(e.target);
+    location.hash = `#/hotel/${id}?in=${f.get("in")}&out=${f.get("out")}&rooms=${f.get("rooms")}`; };
+}
+
+async function choose(h, t, sin, sout, rooms, btn) {
+  CTX.type = t; syncInvSelectors();
+  needLogin(async () => {
+    btn.disabled = true;
+    const r = await api("POST", "/api/v1/reservation-orders", {hotelID: h, roomTypeID: t, startDate: sin, endDate: sout, roomCount: rooms});
+    btn.disabled = false;
+    if (!r.ok) { $("#msg").innerHTML = `<div class="notice err">${esc(r.data?.message || "예약창을 열지 못했습니다")}</div>`; return; }
+    sessionStorage.setItem("order:" + r.data.reservationID, JSON.stringify(r.data));
+    location.hash = "#/checkout/" + r.data.reservationID;
+  });
+}
+
+/* ═════════ 페이지: 예약창 ═════════ */
+function steps(i) { return `<div class="steps">${["객실 선택", "예약 정보 확인", "결제", "완료"].map((x, k) => `<span class="${k === i ? "on" : ""}">${k + 1}. ${x}</span>`).join("<span>›</span>")}</div>`; }
+function summary(H, T, o) {
+  return `<div class="panel"><div style="height:120px;border-radius:12px;overflow:hidden;margin-bottom:12px">${scene(H.scene, H.hotel_id)}</div>
+    <h2 style="margin:0">${esc(H.name)}</h2><div class="muted small" style="margin-bottom:10px">${esc(T.name)} · 객실 ${o.roomCount}개</div>
+    <div class="row"><span>체크인</span><b>${fmtD(o.startDate)}</b></div><div class="row"><span>체크아웃</span><b>${fmtD(o.endDate)}</b></div>
+    ${(o.nightly || []).map(x => `<div class="row small muted"><span>${fmtD(x.date)}</span><span>${won(x.rate)} × ${o.roomCount}</span></div>`).join("")}
+    <div class="row total"><span>총 결제 금액</span><span>${won(o.amount)}</span></div>
+    <div class="rid">예약 번호 ${esc(o.reservationID || o.reservation_id)}</div></div>`;
+}
+async function pageCheckout(app, rid) {
+  const o = JSON.parse(sessionStorage.getItem("order:" + rid) || "null");
+  if (!o) { app.innerHTML = `<div class="wrap"><div class="notice err">예약 정보를 찾을 수 없습니다.</div></div>`; return; }
+  const H = (await hotels()).find(h => h.hotel_id === o.hotelID), T = H.room_types.find(t => t.room_type_id === o.roomTypeID);
+  const g = auth.guest || {};
+  app.innerHTML = `<div class="wrap">${steps(1)}<div class="two">
+    <div class="panel"><h2>예약자 정보</h2>
+      <div class="field"><span>이름</span><input value="${esc(g.name)}"></div>
+      <div class="field"><span>이메일</span><input value="${esc(g.email)}"></div>
+      <div class="field"><span>요청 사항 (선택)</span><input placeholder="예: 높은 층 부탁드립니다"></div>
+      <div class="notice info" id="left">예약창은 <b id="cd">15:00</b> 동안 유지됩니다.</div>
+      <div id="msg"></div>
+      <button class="btn" style="width:100%;padding:14px" id="go">${won(o.amount)} 예약 완료</button>
+      <p class="muted small">"예약 완료"를 누르면 객실이 잡히고, 결제 단계로 넘어갑니다.</p></div>
+    ${summary(H, T, o)}</div></div>`;
+  const tick = () => { const s = Math.max(0, o.expiresAt - Date.now() / 1000); const cd = $("#cd"); if (cd) cd.textContent = `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`; };
+  tick(); window._poll = setInterval(tick, 1000);
+  $("#go").onclick = async e => {
+    const b = e.currentTarget;
+    if (CFG.client_guard === "1") { b.disabled = true; b.textContent = "처리 중…"; }
+    const r = await api("POST", "/api/v1/reservations", {reservationID: o.reservationID, hotelID: o.hotelID, roomTypeID: o.roomTypeID,
+      startDate: o.startDate, endDate: o.endDate, roomCount: o.roomCount});
+    if (r.ok) { if (r.data.replayed) toast("이미 접수된 예약입니다 (같은 예약 번호)"); location.hash = "#/pay/" + o.reservationID; return; }
+    b.disabled = false; b.textContent = `${won(o.amount)} 예약 완료`;
+    $("#msg").innerHTML = `<div class="notice err">${esc(r.data?.message || "예약하지 못했습니다")}
+      <div style="margin-top:6px"><a href="#/hotel/${o.hotelID}?in=${o.startDate}&out=${o.endDate}&rooms=${o.roomCount}">다른 객실 보기 ›</a></div></div>`;
+  };
+}
+
+/* ═════════ 페이지: 결제 ═════════ */
+async function pagePay(app, rid) {
+  const r = await api("GET", "/api/v1/reservations/" + rid);
+  if (!r.ok) throw new Error(r.data?.message || "예약을 찾을 수 없습니다");
+  const R = r.data;
+  if (R.status !== "pending") { location.hash = "#/done/" + rid; return; }
+  const H = (await hotels()).find(h => h.hotel_id === R.hotel_id), T = H.room_types.find(t => t.room_type_id === R.room_type_id);
+  const o = {...R, startDate: R.start_date, endDate: R.end_date, roomCount: R.room_count,
+    nightly: JSON.parse(sessionStorage.getItem("order:" + rid) || "{}").nightly};
+  const limit = +CFG.pending_timeout_s || 180, created = new Date(R.created_at).getTime() / 1000;
+  app.innerHTML = `<div class="wrap">${steps(2)}<div class="two">
+    <div class="panel"><h2>결제</h2>
+      <div class="notice warn">객실을 잠시 잡아 두었습니다. <b id="cd"></b> 안에 결제하지 않으면 예약이 자동으로 취소됩니다.</div>
+      <div class="field"><span>카드 번호</span><input id="card" value="4242 4242 4242 4242" inputmode="numeric"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div class="field"><span>유효 기간</span><input value="12 / 29"></div>
+        <div class="field"><span>CVC</span><input value="123"></div></div>
+      <div id="msg"></div>
+      <button class="btn" style="width:100%;padding:14px" id="go">${won(R.amount)} 결제하기</button></div>
+    ${summary(H, T, o)}</div></div>`;
+  const tick = () => { const s = Math.max(0, created + limit - Date.now() / 1000); const cd = $("#cd"); if (cd) cd.textContent = `${Math.floor(s / 60)}분 ${Math.floor(s % 60)}초`; };
+  tick(); window._poll = setInterval(tick, 1000);
+  $("#go").onclick = async e => {
+    const b = e.currentTarget;
+    if (CFG.client_guard === "1") { b.disabled = true; b.textContent = "결제 중…"; }
+    const p = await api("POST", "/api/v1/payments", {reservationID: rid, cardNumber: $("#card").value});
+    if (p.ok) { location.hash = "#/done/" + rid; return; }
+    b.disabled = false; b.textContent = `${won(R.amount)} 결제하기`;
+    $("#msg").innerHTML = `<div class="notice err">${esc(p.data?.message || "결제하지 못했습니다")}</div>`;
+    if (p.status === 402 || p.status === 409) setTimeout(() => location.hash = "#/done/" + rid, 1800);
+  };
+}
+
+/* ═════════ 페이지: 완료 ═════════ */
+const ST = {pending: "결제 대기", paid: "예약 확정", rejected: "결제 실패", cancelled: "취소됨", refunded: "환불됨"};
+async function pageDone(app, rid) {
+  const draw = async () => {
+    const r = await api("GET", "/api/v1/reservations/" + rid);
+    if (!r.ok) throw new Error("예약을 찾을 수 없습니다");
+    const R = r.data, H = (await hotels()).find(h => h.hotel_id === R.hotel_id), T = H.room_types.find(t => t.room_type_id === R.room_type_id);
+    const big = {paid: ["✅", "예약이 확정되었습니다", "체크인 때 프런트에서 객실 번호를 안내해 드립니다."],
+      pending: ["⏳", "결제를 확인하고 있습니다", "카드사 결과를 기다리는 중입니다. 잠시만 기다려 주세요."],
+      rejected: ["❌", "결제가 완료되지 않았습니다", R.status_reason || "카드 승인이 거절되었습니다."],
+      cancelled: ["🚫", "예약이 취소되었습니다", R.status_reason || ""], refunded: ["↩️", "환불되었습니다", R.status_reason || ""]}[R.status];
+    app.innerHTML = `<div class="wrap">${steps(3)}<div class="two">
+      <div class="panel big-status"><div class="ic">${big[0]}</div><h1>${big[1]}</h1><p class="muted">${esc(big[2])}</p>
+        <span class="st ${R.status}">${ST[R.status]}</span>
+        <div style="margin-top:18px;display:flex;gap:8px;justify-content:center"><a class="btn ghost" href="#/trips">내 예약</a><a class="btn" href="#/">홈으로</a></div></div>
+      ${summary(H, T, {...R, startDate: R.start_date, endDate: R.end_date, roomCount: R.room_count})}</div></div>`;
+    return R.status;
+  };
+  if (await draw() === "pending") window._poll = setInterval(async () => { if (await draw() !== "pending") clearInterval(window._poll); }, 2000);
+}
+
+/* ═════════ 페이지: 내 예약 ═════════ */
+async function pageTrips(app) {
+  if (!auth.token) { app.innerHTML = `<div class="wrap"><div class="section-h"><h2>내 예약</h2></div><p>로그인하면 예약 내역을 볼 수 있습니다.</p><button class="btn" onclick="openLogin(route)">로그인</button></div>`; return; }
+  const [r, hs] = await Promise.all([api("GET", "/api/v1/reservations"), hotels()]);
+  const rows = r.data || [];
+  app.innerHTML = `<div class="wrap"><div class="section-h"><h2>내 예약</h2><span class="muted small">${rows.length}건</span></div>
+    ${rows.length ? rows.map(R => { const H = hs.find(h => h.hotel_id === R.hotel_id), T = H.room_types.find(t => t.room_type_id === R.room_type_id);
+      return `<div class="trip"><div class="thumb">${scene(H.scene, H.hotel_id)}</div>
+        <div><span class="st ${R.status}">${ST[R.status]}</span> <b>${esc(H.name)}</b><div class="small">${esc(T.name)} · 객실 ${R.room_count}개 · ${fmtD(R.start_date)} – ${fmtD(R.end_date)}</div>
+          <div class="small muted">${won(R.amount)}${R.status_reason ? " · " + esc(R.status_reason) : ""}</div><div class="rid">예약 번호 ${R.reservation_id}</div></div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          ${R.status === "pending" ? `<a class="btn sm" href="#/pay/${R.reservation_id}">결제하기</a>` : ""}
+          ${["pending", "paid"].includes(R.status) ? `<button class="btn danger sm" onclick="cancelRes('${R.reservation_id}')">예약 취소</button>` : ""}
+        </div></div>`; }).join("") : `<p class="muted">아직 예약이 없습니다.</p>`}</div>`;
+}
+async function cancelRes(rid) {
+  if (!confirm("예약을 취소할까요?")) return;
+  const r = await api("DELETE", "/api/v1/reservations/" + rid);
+  toast(r.ok ? (r.data.status === "refunded" ? "취소되었습니다. 결제 금액은 환불됩니다." : "취소되었습니다.") : (r.data?.message || "취소 실패"));
+  route();
+}
+
+/* ═════════ 개발자 패널 ═════════ */
+function toggleDev() { $("#dev").classList.toggle("open"); document.body.classList.toggle("dev-open", $("#dev").classList.contains("open"));
+  localStorage.setItem("devOpen", $("#dev").classList.contains("open") ? "1" : ""); refreshPane(); }
+let PANE = localStorage.getItem("devPane") || "flow";
+$("#dev-tabs").onclick = e => { const t = e.target.dataset.t; if (!t) return; PANE = t; localStorage.setItem("devPane", t); showPane(); };
+function showPane() {
+  document.querySelectorAll("#dev-tabs button").forEach(b => b.classList.toggle("on", b.dataset.t === PANE));
+  document.querySelectorAll(".dev-pane").forEach(p => p.classList.toggle("on", p.id === "p-" + PANE));
+  refreshPane();
+}
+function refreshPane() { if (!$("#dev").classList.contains("open")) return;
+  if (PANE === "inv") loadInv(); if (PANE === "res") loadRes(); if (PANE === "flow") renderTraces(); }
+
+/* 흐름 */
+const TR = new Map();      // trace id → {events, first}
+const LABEL = {req: "→", res: "←", call: "↗", ret: "↙", sql: "SQL", tx: "TX", cache: "⚡", state: "◆", idem: "🔑", check: "✓", info: "·", id: "#", cfg: "⚙"};
+const es = new EventSource("/dev/events");
+es.onopen = () => $("#sse-dot").classList.remove("off");
+es.onerror = () => $("#sse-dot").classList.add("off");
+es.onmessage = m => {
+  const ev = JSON.parse(m.data);
+  flashArch(ev);
+  if (ev.trace.startsWith("dev-")) return;
+  let t = TR.get(ev.trace);
+  if (!t) { t = {id: ev.trace, events: [], t0: ev.t}; TR.set(ev.trace, t); if (TR.size > 120) TR.delete(TR.keys().next().value); }
+  t.events.push(ev); t.last = ev.t;
+  scheduleRender();
+  if (["state", "tx", "cache"].includes(ev.kind) || (ev.kind === "sql" && ev.svc === "reservation")) { if (PANE === "inv") debounce("inv", loadInv, 300); if (PANE === "res") debounce("res", loadRes, 300); }
+  if (ev.kind === "state" && ev.svc === "reservation") debounce("route", () => { const p = parseHash().parts[0]; if (p === "trips") route(); }, 400);
+};
+const _db = {}; function debounce(k, f, ms) { clearTimeout(_db[k]); _db[k] = setTimeout(f, ms); }
+let _raf = 0; function scheduleRender() { if (!_raf) _raf = requestAnimationFrame(() => { _raf = 0; if (PANE === "flow") renderTraces(); }); }
+const OPEN = new Set(); const CLOSED = new Set();
+function clearTraces() { TR.clear(); renderTraces(); }
+$("#only-mine").onchange = renderTraces; $("#hide-get").onchange = renderTraces;
+function traceTitle(t) {
+  const req = t.events.find(e => e.kind === "req");
+  if (req) return req.text;
+  const first = t.events[0]; return `[${t.id.split("-")[0]}] ${first.text}`;
+}
+function renderTraces() {
+  if (!$("#dev").classList.contains("open")) return;
+  const mine = $("#only-mine").checked, hideGet = $("#hide-get").checked;
+  const list = [...TR.values()].filter(t => !mine || t.id.startsWith(TAB)).reverse();
+  const newest = list.find(t => !(hideGet && /^GET /.test(traceTitle(t))));
+  $("#traces").innerHTML = list.slice(0, 80).map(t => {
+    const title = traceTitle(t), res = t.events.find(e => e.kind === "res");
+    const isGet = /^GET |\[직원\] GET/.test(title);
+    const open = OPEN.has(t.id) || (!CLOSED.has(t.id) && t === newest) || (!CLOSED.has(t.id) && !isGet && !hideGet);
+    const svcs = [...new Set(t.events.map(e => e.svc))];
+    const bad = t.events.some(e => e.error || (e.kind === "check" && e.ok === false) || e.kind === "idem");
+    const dur = Math.round((t.last - t.t0) * 1000);
+    return `<div class="trace ${open ? "open" : ""}" data-id="${t.id}">
+      <div class="trace-h" onclick="toggleTrace('${t.id}')">
+        <span class="t">${esc(title)}</span>${svcs.map(s => `<span class="svc ${s}">${s}</span>`).join("")}
+        ${res ? `<span class="s ${res.status < 400 ? "ok" : "bad"}">${res.status}</span>` : ""}<span class="s ${bad ? "bad" : ""}">${dur}ms</span></div>
+      <div class="trace-b">${open ? t.events.map(e => evRow(e, t.t0)).join("") : ""}</div></div>`;
+  }).join("") || `<p class="hint">사이트를 둘러보거나 예약하면 요청이 서비스들을 어떻게 지나가는지 여기에 쌓입니다.</p>`;
+}
+function toggleTrace(id) { const el = document.querySelector(`.trace[data-id="${id}"]`); const open = el.classList.contains("open");
+  (open ? CLOSED : OPEN).add(id); (open ? OPEN : CLOSED).delete(id); renderTraces(); }
+function evRow(e, t0) {
+  const ms = Math.round((e.t - t0) * 1000);
+  const meta = [e.ms != null ? e.ms + "ms" : "", e.info || "", e.to ? "→ " + e.to : ""].filter(Boolean).join(" · ");
+  let body;
+  if (e.kind === "sql") body = `<pre>${esc(e.text)}</pre>${e.error ? `<div class="x">${esc(e.error)}</div>` : ""}`;
+  else body = `<div class="x ${e.kind === "check" ? (e.ok ? "ok" : "no") : ""}">${esc(LABEL[e.kind] || "")} ${esc(e.text)}</div>`;
+  return `<div class="ev k-${e.kind} ${e.error ? "err" : ""}"><span class="ms">+${ms}</span><span class="svc ${e.svc}">${e.svc}</span>
+    <div>${body}${meta ? `<div class="meta">${esc(meta)}</div>` : ""}</div></div>`;
+}
+
+/* 구조 */
+const ARCH = {
+  nodes: {
+    user: [20, 10, 130, 38, "손님 (웹·앱)", "이 브라우저"], admin: [400, 10, 140, 38, "호텔 직원", ":8008"],
+    gateway: [10, 78, 200, 44, "Public API Gateway", "정적 파일(CDN) · 인증 · 처리율 제한"], "internal-api": [390, 78, 160, 44, "Internal API", "VPN 뒤"],
+    hotel: [6, 170, 96, 42, "Hotel Service"], rate: [114, 170, 96, 42, "Rate Service"], reservation: [222, 170, 110, 42, "Reservation", "Service"],
+    payment: [344, 170, 96, 42, "Payment Service"], mgmt: [452, 170, 102, 42, "Hotel Mgmt", "Service"],
+    "db-guest": [16, 282, 72, 40, "guest", "schema"], "db-hotel": [96, 282, 72, 40, "hotel", "schema"], "db-rate": [176, 282, 72, 40, "rate", "schema"],
+    "db-reservation": [256, 282, 92, 40, "reservation", "예약 + 재고"], "db-payment": [356, 282, 72, 40, "payment", "schema"],
+    redis: [452, 270, 100, 52, "Redis", "재고 캐시 · 처리율"],
+  },
+  edges: [["user", "gateway"], ["admin", "internal-api"], ["gateway", "hotel"], ["gateway", "rate"], ["gateway", "reservation"], ["gateway", "payment"],
+    ["internal-api", "mgmt"], ["mgmt", "hotel"], ["mgmt", "reservation"], ["reservation", "rate"], ["payment", "reservation"], ["reservation", "payment"],
+    ["gateway", "db-guest"], ["hotel", "db-hotel"], ["rate", "db-rate"], ["reservation", "db-reservation"], ["payment", "db-payment"],
+    ["reservation", "redis"], ["gateway", "redis"]],
+};
+const CNT = {req: 0, sql: 0, cache: 0, state: 0, idem: 0, conflict: 0};
+function drawArch() {
+  const N = ARCH.nodes, c = k => [N[k][0] + N[k][2] / 2, N[k][1] + N[k][3] / 2];
+  const edge = ([a, b]) => { const [x1, y1] = c(a), [x2, y2] = c(b);
+    const ya = y1 < y2 ? N[a][1] + N[a][3] : N[a][1], yb = y1 < y2 ? N[b][1] : N[b][1] + N[b][3];
+    if (Math.abs(y1 - y2) < 5) return `<path id="e-${a}-${b}" class="eg" d="M${x1} ${y1 + 21} C${x1} ${y1 + 44} ${x2} ${y2 + 44} ${x2} ${y2 + 21}"/>`;
+    return `<path id="e-${a}-${b}" class="eg" d="M${x1} ${ya} C${x1} ${(ya + yb) / 2} ${x2} ${(ya + yb) / 2} ${x2} ${yb}"/>`; };
+  $("#arch").innerHTML = `<svg viewBox="0 0 560 334">
+    <rect class="grp" x="8" y="258" width="430" height="72"/><text class="glabel" x="16" y="272">PostgreSQL 인스턴스 1개 · 서비스마다 스키마 + 계정</text>
+    ${ARCH.edges.map(edge).join("")}
+    ${Object.entries(N).map(([k, [x, y, w, h, t, s]]) => `<g class="nd" id="n-${k}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="8"/>
+      <text x="${x + w / 2}" y="${y + (s ? h / 2 - 2 : h / 2 + 4)}">${t}</text>${s ? `<text class="sub" x="${x + w / 2}" y="${y + h / 2 + 11}">${s}</text>` : ""}</g>`).join("")}
+  </svg>`;
+  drawCounters();
+}
+function drawCounters() { $("#counters").innerHTML = [["req", "API 요청"], ["sql", "SQL"], ["cache", "캐시 접근"], ["state", "상태 변화"], ["idem", "멱등 키로 막음"], ["conflict", "재고 검사 거절"]]
+  .map(([k, l]) => `<div><b>${CNT[k]}</b><span>${l}</span></div>`).join(""); }
+function flash(id) { const el = document.getElementById(id); if (!el) return; el.classList.remove("flash"); void el.getBBox?.(); el.classList.add("flash"); clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove("flash"), 700); }
+function flashArch(e) {
+  if (e.trace.startsWith("dev-")) return;
+  if (e.kind === "req") { CNT.req++; if (e.svc === "gateway") { flash("n-user"); flash("e-user-gateway"); flash("n-gateway"); } else { flash("n-admin"); flash("e-admin-internal-api"); flash("n-internal-api"); } }
+  if (e.kind === "call") { flash("n-" + e.to); flash(`e-${e.svc}-${e.to}`); flash(`e-${e.to}-${e.svc}`); }
+  if (e.kind === "sql") { CNT.sql++; const db = "db-" + (e.svc === "gateway" ? "guest" : e.svc); flash("n-" + db); flash(`e-${e.svc}-${db}`); }
+  if (e.kind === "cache") { CNT.cache++; flash("n-redis"); flash(`e-${e.svc}-redis`); }
+  if (e.kind === "state") CNT.state++;
+  if (e.kind === "idem") CNT.idem++;
+  if (e.kind === "check" && e.ok === false) CNT.conflict++;
+  if (["sql", "cache", "state", "idem", "check", "req"].includes(e.kind)) drawCounters();
+}
+
+/* 재고 */
+async function syncInvSelectors() {
+  const hs = await hotels();
+  $("#inv-hotel").innerHTML = hs.map(h => `<option value="${h.hotel_id}" ${h.hotel_id === CTX.hotel ? "selected" : ""}>${esc(h.name)}</option>`).join("");
+  const H = hs.find(h => h.hotel_id === CTX.hotel);
+  $("#inv-type").innerHTML = H.room_types.map(t => `<option value="${t.room_type_id}" ${t.room_type_id === CTX.type ? "selected" : ""}>${esc(t.name)} (${t.room_total}실)</option>`).join("");
+  $("#inv-start").value = CTX.in || addDays(ymd(new Date()), 7);
+  if (PANE === "inv") loadInv();
+}
+$("#inv-hotel").onchange = () => { CTX.hotel = +$("#inv-hotel").value; CTX.type = null; hotels().then(hs => { CTX.type = hs.find(h => h.hotel_id === CTX.hotel).room_types[0].room_type_id; syncInvSelectors(); }); };
+$("#inv-type").onchange = () => { CTX.type = +$("#inv-type").value; loadInv(); };
+$("#inv-start").onchange = () => { CTX.in = $("#inv-start").value; if (!CTX.out || CTX.out <= CTX.in) CTX.out = addDays(CTX.in, 2); loadInv(); };
+let INV_PREV = {};
+async function loadInv() {
+  const start = addDays($("#inv-start").value || ymd(new Date()), -1);
+  const r = await api("GET", `/dev/inventory?hotel_id=${CTX.hotel}&room_type_id=${CTX.type}&start=${start}&days=12`, null, {dev: 1});
+  const rows = r.data || [];
+  const stay = d => CTX.in && CTX.out && d >= CTX.in && d < CTX.out;
+  $("#inv-table").innerHTML = `<tr><th class="l">date</th><th>total_inventory</th><th>한도</th><th>total_reserved</th><th>version</th><th>DB 남음</th><th>캐시 남음</th></tr>` +
+    rows.map(x => { const key = x.date, sig = `${x.total_reserved}/${x.cache_left}`, changed = INV_PREV[key] && INV_PREV[key] !== sig; INV_PREV[key] = sig;
+      return `<tr class="${x.db_left < 0 ? "over" : ""} ${x.cache_left !== x.db_left ? "diff" : ""} ${changed ? "flash" : ""}">
+      <td class="l">${stay(x.date) ? "▶ " : ""}${x.date}</td><td>${x.total_inventory}</td><td>${x.limit}</td><td>${x.total_reserved}</td><td>${x.version}</td>
+      <td>${x.db_left < 0 ? `${x.db_left} 초과!` : x.db_left}</td><td class="c">${x.cache_left ?? "–"}</td></tr>`; }).join("");
+}
+
+/* 예약 */
+async function loadRes() {
+  const [r, p] = await Promise.all([api("GET", "/dev/reservations", null, {dev: 1}), api("GET", "/dev/payments", null, {dev: 1})]);
+  const hs = await hotels(), tn = id => hs.flatMap(h => h.room_types).find(t => t.room_type_id === id)?.name || id;
+  $("#res-table").innerHTML = `<tr><th class="l">reservation_id</th><th class="l">guest</th><th class="l">객실 유형</th><th class="l">기간</th><th>수</th><th class="l">status · 이력</th></tr>` +
+    (r.data || []).map(x => `<tr><td class="l">${x.reservation_id}</td><td class="l">${x.guest_id}</td><td class="l">${esc(tn(x.room_type_id))}</td>
+      <td class="l">${x.start_date.slice(5)}~${x.end_date.slice(5)}</td><td>${x.room_count}</td>
+      <td class="l"><span class="pill ${x.status}">${x.status}</span> <span style="color:#6b7280">${x.history.map(h => h.to).join(" → ")}</span>
+      ${x.status_reason ? `<div style="color:#9aa3b2">${esc(x.status_reason)}</div>` : ""}</td></tr>`).join("");
+  $("#pay-table").innerHTML = `<tr><th class="l">reservation_id</th><th>amount</th><th class="l">status</th><th class="l">notified</th><th class="l">note</th></tr>` +
+    (p.data || []).map(x => `<tr><td class="l">${x.reservation_id}</td><td>${Number(x.amount).toLocaleString()}</td><td class="l"><span class="pill ${x.status}">${x.status}</span></td>
+      <td class="l">${x.notified ? "✓" : `<span style="color:#fca5a5">✗ 미통보</span>`}</td><td class="l">${esc(x.note || "")}</td></tr>`).join("");
+}
+
+/* 실험 */
+const LOCKS = [
+  ["none", "잠금 없음", "SELECT 로 확인하고 UPDATE. 경쟁 구간에 둘 다 통과하면 이중 예약."],
+  ["pessimistic", "비관적 락", "SELECT … FOR UPDATE 로 행을 잠근다. 뒤 요청은 앞 트랜잭션이 끝날 때까지 기다린다."],
+  ["optimistic", "낙관적 락", "version 을 읽고 UPDATE … WHERE version = 읽은 값. 바뀌었으면 충돌 → 최대 5번 재시도."],
+  ["constraint", "DB 제약 조건", "CHECK (total_reserved ≤ 한도) 를 테이블에 건다. 넘으면 DB 가 트랜잭션을 롤백."],
+  ["atomic", "조건부 UPDATE (토론 2번)", "UPDATE … WHERE total_reserved + n ≤ 한도 한 문장. 바뀐 행 수 = 숙박일 수인지 본다."],
+];
+function renderLab() {
+  $("#locks").innerHTML = LOCKS.map(([k, t, d]) => `<label class="${CFG.lock === k ? "on" : ""}"><input type="radio" name="lock" value="${k}" ${CFG.lock === k ? "checked" : ""}>
+    <span><b>${t}</b><small>${d}</small></span></label>`).join("");
+  document.querySelectorAll("[data-cfg]").forEach(el => { const v = CFG[el.dataset.cfg]; if (el.type === "checkbox") el.checked = v === "1"; else el.value = v; });
+}
+$("#locks").onchange = e => setCfg({lock: e.target.value});
+document.querySelectorAll("[data-cfg]").forEach(el => el.onchange = () => setCfg({[el.dataset.cfg]: el.type === "checkbox" ? (el.checked ? "1" : "0") : el.value}));
+async function setCfg(o) { CFG = (await api("PUT", "/dev/cfg", o, {dev: 1})).data; renderLab(); toast("설정을 바꿨습니다: " + Object.entries(o).map(([k, v]) => `${k}=${v}`).join(", ")); if (PANE === "inv") loadInv(); }
+
+function stayRange() { const sin = CTX.in || addDays(ymd(new Date()), 7); return [sin, CTX.out && CTX.out > sin ? CTX.out : addDays(sin, 2)]; }
+async function lastRoomOnly() {
+  const [sin, sout] = stayRange();
+  await api("POST", "/dev/last-room", {hotelID: CTX.hotel, roomTypeID: CTX.type, startDate: sin, endDate: sout, left: 1}, {dev: 1});
+  toast(`${sin} ~ ${sout} 남은 객실을 1개로 만들었습니다`); loadInv(); if (parseHash().parts[0] === "hotel") route();
+}
+async function raceLastRoom() {
+  const n = Math.max(2, Math.min(20, +$("#race-n").value || 5)), out = $("#race-out");
+  const [sin, sout] = stayRange();
+  out.hidden = false; out.textContent = `준비: ${sin} ~ ${sout} 남은 객실 1개 · 봇 ${n}명 · 락 = ${CFG.lock} · 경쟁 구간 ${CFG.race_ms}ms\n`;
+  await api("POST", "/dev/last-room", {hotelID: CTX.hotel, roomTypeID: CTX.type, startDate: sin, endDate: sout, left: 1}, {dev: 1});
+  const bots = (await api("POST", "/dev/bots", {n}, {dev: 1})).data;
+  const orders = await Promise.all(bots.map(b => api("POST", "/api/v1/reservation-orders",
+    {hotelID: CTX.hotel, roomTypeID: CTX.type, startDate: sin, endDate: sout, roomCount: 1}, {token: b.token})));
+  out.textContent += `예약창 ${orders.filter(o => o.ok).length}/${n}개 열림 → 동시에 "예약 완료"\n\n`;
+  const t0 = performance.now();
+  const res = await Promise.all(orders.map((o, i) => !o.ok ? Promise.resolve({status: o.status, data: o.data, ms: 0}) :
+    api("POST", "/api/v1/reservations", {reservationID: o.data.reservationID}, {token: bots[i].token}).then(r => ({...r, ms: Math.round(performance.now() - t0)}))));
+  let okN = 0;
+  res.forEach((r, i) => { if (r.ok) okN++;
+    out.textContent += `${bots[i].name}  ${r.ok ? "✅ 예약 성공" : "❌ " + (r.data?.message || r.status)}${r.data?.source ? ` [${r.data.source}]` : ""}  ${r.ms}ms\n`; });
+  const inv = (await api("GET", `/dev/inventory?hotel_id=${CTX.hotel}&room_type_id=${CTX.type}&start=${sin}&days=${nightsOf(sin, sout)}`, null, {dev: 1})).data;
+  const over = Math.max(...inv.map(x => -x.db_left));
+  out.textContent += `\n성공 ${okN}건 · ` + (over > 0 ? `🚨 한도보다 ${over}실 더 팔림 (이중 예약)` : `정상: 남은 1실만 팔림`);
+  loadInv();
+}
+async function crossSchema() {
+  const r = await api("POST", "/dev/cross-schema", {}, {dev: 1}), o = $("#cross-out");
+  o.hidden = false; o.textContent = r.data?.ok ? "성공해 버렸습니다(?)" : "❌ " + r.data?.error;
+}
+async function resetAll() {
+  if (!confirm("예약·결제 데이터를 모두 지울까요?")) return;
+  await api("POST", "/dev/reset", {}, {dev: 1}); TR.clear(); toast("초기화했습니다"); route(); refreshPane();
+}
+
+/* ═════════ 시작 ═════════ */
+drawArch();
+(async () => {
+  await loadCfg(); await syncInvSelectors();
+  if (localStorage.getItem("devOpen")) toggleDev();
+  showPane(); route();
+})();
+</script>
+</body>
+</html>

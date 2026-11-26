@@ -552,6 +552,7 @@ figcaption b{color:var(--ink);font-weight:740}
   "reservationID": "U12354673390"
 }</code></pre>
 <p><code>reservationID</code>는 <strong>이중 예약을 막는 멱등 키</strong>다. 이중 예약이란 같은 날 같은 방에 예약이 여러 개 잡히는 것이다(3단계 「동시성 문제」).</p>
+<p><code>reservationID</code>는 사용자가 예약창(예약 확인 페이지)에 들어갈 때 서버가 새로 만들어 준다. 예약 한 건마다 하나씩이다.</p>
 
 <h3>데이터 모델</h3>
 <p>지원할 질의:</p>
