@@ -66,6 +66,7 @@ if MODE == "public":
 
     @app.post("/api/auth/login")
     async def login(body: dict):
+        await emit("req", "POST /api/auth/login")
         name = str(body.get("name", "")).strip()[:20]
         if not name:
             return JSONResponse({"message": "이름을 입력해 주세요"}, status_code=400)
@@ -87,7 +88,7 @@ if MODE == "public":
         t0 = time.perf_counter()
         head = path.split("/")[0]
         route = next((r for r in ROUTES if r[0] == head), None)
-        await emit("req", f"{request.method} /v1/{path}" + (f"?{request.url.query}" if request.url.query else ""))
+        await emit("req", f"{request.method} /v1/{path}" + (f"?{request.url.query}" if request.url.query else ""), rl=True)
         if not route:
             return JSONResponse({"message": "없는 API"}, status_code=404)
         _, svc, need_auth = route

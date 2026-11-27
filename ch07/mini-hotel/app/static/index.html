@@ -275,7 +275,7 @@ body.dev-open{padding-right:min(600px,100vw)}
     <div class="dev-pane" id="p-arch">
       <div id="arch"></div>
       <div class="counters" id="counters"></div>
-      <p class="arch-legend">교재 그림 4·5의 구성을 그대로 컨테이너로 띄웠습니다. 요청이 지나가면 그 상자와 선이 노랗게 깜빡입니다.
+      <p class="arch-legend">교재 그림 4·5의 구성을 그대로 컨테이너로 띄웠습니다. 요청이 지나간 상자와 선은 노랗게 표시되고, 다음 액션이 올 때까지 그대로 남습니다.
         PostgreSQL 은 인스턴스 하나지만 서비스마다 <b>스키마와 계정</b>을 따로 둬서, 다른 서비스의 테이블은 읽지도 쓰지도 못합니다.
         샤딩은 하지 않았습니다(<code>hash(hotel_id) % N</code>, 여기서는 N = 1).</p>
     </div>
@@ -805,13 +805,20 @@ function drawArch() {
 }
 function drawCounters() { $("#counters").innerHTML = [["req", "API 요청"], ["sql", "SQL"], ["cache", "캐시 접근"], ["state", "상태 변화"], ["idem", "멱등 키로 막음"], ["conflict", "재고 검사 거절"]]
   .map(([k, l]) => `<div><b>${CNT[k]}</b><span>${l}</span></div>`).join(""); }
-function flash(id) { const el = document.getElementById(id); if (!el) return; el.classList.remove("flash"); void el.getBBox?.(); el.classList.add("flash"); clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove("flash"), 700); }
+// 한 액션(클릭 하나)이 지나간 경로는 다음 액션이 올 때까지 노랗게 남겨 둔다.
+// 이벤트가 ARCH_GAP_MS 넘게 끊겼다가 다시 오면 새 액션으로 보고 이전 경로를 지운다.
+const ARCH_GAP_MS = 1500; let archLast = 0;
+function flash(id) { const el = document.getElementById(id); if (el) el.classList.add("flash"); }
 function flashArch(e) {
   if (e.trace.startsWith("dev-")) return;
-  if (e.kind === "req") { CNT.req++; if (e.svc === "gateway") { flash("n-user"); flash("e-user-gateway"); flash("n-gateway"); } else { flash("n-admin"); flash("e-admin-internal-api"); flash("n-internal-api"); } }
+  const now = Date.now();
+  if (now - archLast > ARCH_GAP_MS) document.querySelectorAll("#arch .flash").forEach(el => el.classList.remove("flash"));
+  archLast = now;
+  if (ARCH.nodes[e.svc]) flash("n-" + e.svc);   // 일한 서비스는 항상 켠다 (타이머·재전송처럼 요청 없이 도는 작업 포함)
+  if (e.kind === "req") { CNT.req++; if (e.svc === "gateway") { flash("n-user"); flash("e-user-gateway"); flash("n-gateway"); if (e.rl) { flash("n-redis"); flash("e-gateway-redis"); } } else { flash("n-admin"); flash("e-admin-internal-api"); flash("n-internal-api"); } }
   if (e.kind === "call") { flash("n-" + e.to); flash(`e-${e.svc}-${e.to}`); flash(`e-${e.to}-${e.svc}`); }
   if (e.kind === "sql") { CNT.sql++; const db = "db-" + (e.svc === "gateway" ? "guest" : e.svc); flash("n-" + db); flash(`e-${e.svc}-${db}`); }
-  if (e.kind === "cache") { CNT.cache++; flash("n-redis"); flash(`e-${e.svc}-redis`); }
+  if (e.kind === "cache") { CNT.cache++; if (e.svc !== "hotel") { flash("n-redis"); flash(`e-${e.svc}-redis`); } }   // Hotel Service 는 Redis 가 아니라 자기 메모리 캐시
   if (e.kind === "state") CNT.state++;
   if (e.kind === "idem") CNT.idem++;
   if (e.kind === "check" && e.ok === false) CNT.conflict++;
